@@ -268,14 +268,18 @@ class RssPlugin(Star):
 
         # 为每个订阅添加定时任务
         for url, info in self.data_handler.data.items():
-            if url == "rsshub_endpoints" or url == "settings":
+            if url in ["rsshub_endpoints", "settings"]:
                 continue
             for user, sub_info in info["subscribers"].items():
+                # 使用 url 和 user 生成唯一 ID，防止重复
+                job_id = f"{url}_{user}" 
                 self.scheduler.add_job(
                     self.cron_task_callback,
                     "cron",
                     **self.parse_cron_expr(sub_info["cron_expr"]),
                     args=[url, user],
+                    id=job_id, # 关键：指定 ID
+                    replace_existing=True # 关键：如果存在则替换
                 )
 
     async def _add_url(self, url: str, cron_expr: str, message: AstrMessageEvent):
