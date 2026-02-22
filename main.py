@@ -189,15 +189,19 @@ class RssPlugin(Star):
                     else "未知频道"
                 )
 
-                title = item.xpath("title")[0].text
+                raw_title = item.xpath("title")
+                title = raw_title[0].text if (raw_title and raw_title[0].text) else "无标题"
+                
                 if len(title) > self.title_max_length:
                     title = title[: self.title_max_length] + "..."
 
-                link = item.xpath("link")[0].text
+                link_nodes = item.xpath("link")
+                link = link_nodes[0].text if link_nodes else ""
                 if not re.match(r"^https?://", link):
                     link = self.data_handler.get_root_url(url) + link
-
-                description = item.xpath("description")[0].text
+                
+                raw_desc = item.xpath("description")
+                description = raw_desc[0].text if (raw_desc and raw_desc[0].text) else ""
 
                 pic_url_list = self.data_handler.strip_html_pic(description)
                 description = self.data_handler.strip_html(description)
@@ -207,14 +211,18 @@ class RssPlugin(Star):
                         description[: self.description_max_length] + "..."
                     )
 
-                if item.xpath("pubDate"):
+                pub_date_nodes = item.xpath("pubDate")
+                if pub_date_nodes:
                     # 根据 pubDate 判断是否为新内容
                     pub_date = item.xpath("pubDate")[0].text
-                    pub_date_parsed = time.strptime(
-                        pub_date.replace("GMT", "+0000"),
-                        "%a, %d %b %Y %H:%M:%S %z",
-                    )
-                    pub_date_timestamp = int(time.mktime(pub_date_parsed))
+                    try:
+                        pub_date_parsed = time.strptime(
+                            pub_date.replace("GMT", "+0000"),
+                            "%a, %d %b %Y %H:%M:%S %z",
+                        )
+                        pub_date_timestamp = int(time.mktime(pub_date_parsed))
+                    except:
+                        pub_date_timestamp = 0
 
                     if pub_date_timestamp > after_timestamp:
                         rss_items.append(
@@ -229,21 +237,17 @@ class RssPlugin(Star):
                             )
                         )
                         cnt += 1
-                        if num != -1 and cnt >= num:
-                            break
-                    else:
-                        continue
                 else:
                     # 根据 link 判断是否为新内容
                     if link != after_link:
+                        if not after_link and len(rss_items) >= 1:
+                            continue
                         rss_items.append(
                             RSSItem(chan_title, title, link, description, "", 0, pic_url_list)
                         )
                         cnt += 1
-                        if num != -1 and cnt >= num:
-                            break
-                    else:
-                        continue
+                if num != -1 and cnt >= num:
+                    break
 
             except Exception as e:
                 self.logger.error(f"rss: 解析Rss条目 {url} 失败: {str(e)}")
