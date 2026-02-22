@@ -15,8 +15,25 @@ class RssImageHandler:
         """
         self.is_adjust_pic = is_adjust_pic
 
+    def _proxy_image_url(self, url: str) -> str:
+        """为海外被墙图片添加反代/缓存加速"""
+        # 常见国内无法直接访问的图片域名
+        blocked_domains = [
+            "twimg.com", "pbs.twimg.com", "twitter.com", 
+            "pximg.net", "pixiv.net",
+            "ytimg.com", "youtube.com",
+            "telegram.org", "t.me",
+            "instagram.com", "fbcdn.net"
+        ]
+        if any(domain in url for domain in blocked_domains):
+            # 去掉协议头，交给公共缓存加速节点代理
+            clean_url = url.replace("https://", "").replace("http://", "")
+            proxied_url = f"https://wsrv.nl/?url={clean_url}"
+            print(f"触发海外图片反代: {url} -> {proxied_url}")
+            return proxied_url
+        return url
 
-    async def modify_corner_pixel_to_base64(self,image_url, color=(255, 255, 255)):
+    async def modify_corner_pixel_to_base64(self, image_url, color=(255, 255, 255)):
         """
         从URL读取图片，修改四个角的其中一个像素点为指定颜色，并以 Base64 编码字符串输出。
 
@@ -27,11 +44,16 @@ class RssImageHandler:
         Returns:
             str: 修改后图片的 Base64 编码字符串，如果发生错误则返回 None。
         """
+        # ==== 代理魔法：在真正发起请求前，转换海外图片链接 ====
+        actual_url = self._proxy_image_url(image_url)
+        # ======================================================
+
         try:
             async with aiohttp.ClientSession(trust_env=True) as session:
-                async with session.get(image_url) as resp:
+                # 注意这里请求的是 actual_url 而不是原始的 image_url
+                async with session.get(actual_url) as resp:
                     if resp.status != 200:
-                        print(f"错误：无法从URL '{image_url}' 获取图片: 状态码 {resp.status}")
+                        print(f"错误：无法从URL '{actual_url}' 获取图片: 状态码 {resp.status}")
                         return None
 
                     img_data = BytesIO(await resp.read())
@@ -70,7 +92,7 @@ class RssImageHandler:
                         return base64_string
 
         except aiohttp.ClientError as e:
-            print(f"错误：无法从URL '{image_url}' 获取图片: {e}")
+            print(f"错误：无法从URL '{actual_url}' 获取图片: {e}")
             return None
         except Exception as e:
             print(f"发生错误：{e}")
