@@ -25,6 +25,9 @@ from typing import List
     "https://github.com/Soulter/astrbot_plugin_rss",
 )
 class RssPlugin(Star):
+    # 增加一个类变量，用于存储调度器实例，防止热重载时产生多个定时器泄漏（幽灵任务）
+    _shared_scheduler = None
+
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
 
@@ -46,8 +49,20 @@ class RssPlugin(Star):
 
         # 修复 Bug 5: 移除了重复初始化的 pic_handler
         self.pic_handler = RssImageHandler(self.is_adjust_pic)
-        self.scheduler = AsyncIOScheduler()
+        
+        # --- 修复定时任务重复触发（泄漏）的 Bug ---
+        # 如果之前已经有调度器在运行（通常是因为热重载插件），先将其强制关闭
+        if RssPlugin._shared_scheduler is not None and RssPlugin._shared_scheduler.running:
+            try:
+                RssPlugin._shared_scheduler.shutdown(wait=False)
+            except Exception as e:
+                self.logger.warning(f"关闭旧调度器时出现异常: {e}")
+        
+        # 创建新的调度器并保存到类变量中
+        RssPlugin._shared_scheduler = AsyncIOScheduler()
+        self.scheduler = RssPlugin._shared_scheduler
         self.scheduler.start()
+        # ---------------------------------------
 
         self._fresh_asyncIOScheduler()
 
@@ -68,7 +83,11 @@ class RssPlugin(Star):
         connector = aiohttp.TCPConnector(ssl=False)
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
         try:
-            async with aiohttp.ClientSession(trust_env=True,connector=connector,timeout=timeout,headers=headers) as session:
+            async with aiohttp.ClientSession(trust_env=True,
+                                        connector=connector,
+                                        timeout=timeout,
+                                        headers=headers
+                                        ) as session:
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         self.logger.error(f"rss: 无法正常打开站点 {url}")
@@ -106,6 +125,7 @@ class RssPlugin(Star):
         )
         if not rss_items:
             self.logger.info(f"RSS 定时任务 {url} 无消息更新 - {user}")
+            return
             
         max_ts = last_update
 
@@ -120,7 +140,11 @@ class RssPlugin(Star):
             nodes = []
             for item in rss_items:
                 comps = await self._get_chain_components(item)
-                node = Comp.Node(uin=0,name="Astrbot",content=comps)
+                node = Comp.Node(
+                            uin=0,
+                            name="Astrbot",
+                            content=comps
+                        )
                 nodes.append(node)
                 max_ts = max(max_ts, item.pubDate_timestamp)
 
@@ -143,14 +167,11 @@ class RssPlugin(Star):
                 max_ts = max(max_ts, item.pubDate_timestamp)
 
         # 更新最后更新时间
-        if rss_items:
-            self.data_handler.data[url]["subscribers"][user]["last_update"] = max_ts
-            # 修复：获取最后一条数据（最新数据）的链接，而不是反转后的第一条
-            self.data_handler.data[url]["subscribers"][user]["latest_link"] = rss_items[-1].link
-            self.data_handler.save_data()
-            self.logger.info(f"RSS 定时任务 {url} 推送成功 - {user}")
-        else:
-            self.logger.info(f"RSS 定时任务 {url} 无消息更新 - {user}")
+        self.data_handler.data[url]["subscribers"][user]["last_update"] = max_ts
+        # 修复：获取最后一条数据（最新数据）的链接，而不是反转后的第一条
+        self.data_handler.data[url]["subscribers"][user]["latest_link"] = rss_items[-1].link
+        self.data_handler.save_data()
+        self.logger.info(f"RSS 定时任务 {url} 推送成功 - {user}")
 
 
     async def poll_rss(
