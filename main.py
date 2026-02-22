@@ -108,7 +108,14 @@ class RssPlugin(Star):
             after_timestamp=last_update,
             after_link=latest_link,
         )
+        if not rss_items:
+            self.logger.info(f"RSS 定时任务 {url} 无消息更新 - {user}")
+            
         max_ts = last_update
+
+        # 安全分解 Session，防止崩溃
+        user_parts = user.split(":")
+        message_type = user_parts[1] if len(user_parts) > 1 else ""
 
         # 分解MessageSesion
         platform_name,message_type,session_id = user.split(":")
@@ -124,9 +131,6 @@ class RssPlugin(Star):
                             content=comps
                         )
                 nodes.append(node)
-                self.data_handler.data[url]["subscribers"][user]["last_update"] = int(
-                    time.time()
-                )
                 max_ts = max(max_ts, item.pubDate_timestamp)
 
             # 合并消息发送
@@ -141,13 +145,10 @@ class RssPlugin(Star):
             for item in rss_items:
                 comps = await self._get_chain_components(item)
                 msc = MessageChain(
-                chain=comps,
-                use_t2i_= self.t2i
-            )
-                await self.context.send_message(user, msc)
-                self.data_handler.data[url]["subscribers"][user]["last_update"] = int(
-                    time.time()
+                    chain=comps,
+                    use_t2i_= self.t2i
                 )
+                await self.context.send_message(user, msc)
                 max_ts = max(max_ts, item.pubDate_timestamp)
 
         # 更新最后更新时间
@@ -214,6 +215,7 @@ class RssPlugin(Star):
                         "%a, %d %b %Y %H:%M:%S %z",
                     )
                     pub_date_timestamp = int(time.mktime(pub_date_parsed))
+
                     if pub_date_timestamp > after_timestamp:
                         rss_items.append(
                             RSSItem(
@@ -230,23 +232,24 @@ class RssPlugin(Star):
                         if num != -1 and cnt >= num:
                             break
                     else:
-                        break
+                        continue
                 else:
                     # 根据 link 判断是否为新内容
                     if link != after_link:
-                        rss_items.append(
+                        rss_items.  (
                             RSSItem(chan_title, title, link, description, "", 0, pic_url_list)
                         )
                         cnt += 1
                         if num != -1 and cnt >= num:
                             break
                     else:
-                        break
+                        continue
 
             except Exception as e:
                 self.logger.error(f"rss: 解析Rss条目 {url} 失败: {str(e)}")
-                break
-
+                continue
+            
+        rss_items.reverse()
         return rss_items
 
     def parse_rss_url(self, url: str) -> str:
