@@ -32,7 +32,6 @@ class RssPlugin(Star):
         self.context = context
         self.config = config
         self.data_handler = DataHandler()
-        self.pic_handler = RssImageHandler()
 
         # 提取scheme文件中的配置
         self.title_max_length = config.get("title_max_length")
@@ -45,6 +44,7 @@ class RssPlugin(Star):
         self.max_pic_item = config.get("pic_config").get("max_pic_item")
         self.is_compose = config.get("compose")
 
+        # 修复 Bug 5: 移除了重复初始化的 pic_handler
         self.pic_handler = RssImageHandler(self.is_adjust_pic)
         self.scheduler = AsyncIOScheduler()
         self.scheduler.start()
@@ -52,7 +52,7 @@ class RssPlugin(Star):
         self._fresh_asyncIOScheduler()
 
     def parse_cron_expr(self, cron_expr: str):
-        fields = cron_expr.split(" ")
+        fields = cron_expr.split() # 修复：使用 split() 而不是 split(" ") 防止多个空格导致解析失败
         return {
             "minute": fields[0],
             "hour": fields[1],
@@ -68,11 +68,7 @@ class RssPlugin(Star):
         connector = aiohttp.TCPConnector(ssl=False)
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
         try:
-            async with aiohttp.ClientSession(trust_env=True,
-                                        connector=connector,
-                                        timeout=timeout,
-                                        headers=headers
-                                        ) as session:
+            async with aiohttp.ClientSession(trust_env=True,connector=connector,timeout=timeout,headers=headers) as session:
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         self.logger.error(f"rss: 无法正常打开站点 {url}")
@@ -113,23 +109,18 @@ class RssPlugin(Star):
             
         max_ts = last_update
 
-        # 安全分解 Session，防止崩溃
+        # 修复 Bug 1: 安全分解 Session，防止因为冒号数量不对导致解包崩溃
         user_parts = user.split(":")
+        platform_name = user_parts[0] if len(user_parts) > 0 else ""
         message_type = user_parts[1] if len(user_parts) > 1 else ""
-
-        # 分解MessageSesion
-        platform_name,message_type,session_id = user.split(":")
+        session_id = user_parts[2] if len(user_parts) > 2 else ""
 
         # 分平台处理消息
         if platform_name == "aiocqhttp" and self.is_compose:
             nodes = []
             for item in rss_items:
                 comps = await self._get_chain_components(item)
-                node = Comp.Node(
-                            uin=0,
-                            name="Astrbot",
-                            content=comps
-                        )
+                node = Comp.Node(uin=0,name="Astrbot",content=comps)
                 nodes.append(node)
                 max_ts = max(max_ts, item.pubDate_timestamp)
 
@@ -154,9 +145,8 @@ class RssPlugin(Star):
         # 更新最后更新时间
         if rss_items:
             self.data_handler.data[url]["subscribers"][user]["last_update"] = max_ts
-            self.data_handler.data[url]["subscribers"][user]["latest_link"] = rss_items[
-                0
-            ].link
+            # 修复：获取最后一条数据（最新数据）的链接，而不是反转后的第一条
+            self.data_handler.data[url]["subscribers"][user]["latest_link"] = rss_items[-1].link
             self.data_handler.save_data()
             self.logger.info(f"RSS 定时任务 {url} 推送成功 - {user}")
         else:
@@ -196,8 +186,9 @@ class RssPlugin(Star):
                     title = title[: self.title_max_length] + "..."
 
                 link_nodes = item.xpath("link")
-                link = link_nodes[0].text if link_nodes else ""
-                if not re.match(r"^https?://", link):
+                # 修复 Bug 3: 确保 link 是字符串，避免正则匹配时引发 TypeError
+                link = link_nodes[0].text if (link_nodes and link_nodes[0].text) else ""
+                if link and not re.match(r"^https?://", link):
                     link = self.data_handler.get_root_url(url) + link
                 
                 raw_desc = item.xpath("description")
@@ -291,10 +282,14 @@ class RssPlugin(Star):
         user = message.unified_msg_origin
         if url in self.data_handler.data:
             latest_item = await self.poll_rss(url)
+            # 修复 Bug 2: 如果解析为空，加入默认兜底处理，防止触发 IndexError
+            last_update = latest_item[-1].pubDate_timestamp if latest_item else int(time.time())
+            latest_link = latest_item[-1].link if latest_item else ""
+            
             self.data_handler.data[url]["subscribers"][user] = {
                 "cron_expr": cron_expr,
-                "last_update": latest_item[0].pubDate_timestamp,
-                "latest_link": latest_item[0].link,
+                "last_update": last_update,
+                "latest_link": latest_link,
             }
         else:
             try:
@@ -304,12 +299,16 @@ class RssPlugin(Star):
             except Exception as e:
                 return message.plain_result(f"解析频道信息失败: {str(e)}")
 
+            # 修复 Bug 2
+            last_update = latest_item[-1].pubDate_timestamp if latest_item else int(time.time())
+            latest_link = latest_item[-1].link if latest_item else ""
+
             self.data_handler.data[url] = {
                 "subscribers": {
                     user: {
                         "cron_expr": cron_expr,
-                        "last_update": latest_item[0].pubDate_timestamp,
-                        "latest_link": latest_item[0].link,
+                        "last_update": last_update,
+                        "latest_link": latest_link,
                     }
                 },
                 "info": {
@@ -419,10 +418,10 @@ class RssPlugin(Star):
             yield event.plain_result("索引越界")
             return
         else:
-            # TODO:删除对应的定时任务
-            self.scheduler.remove_job()
+            # 修复 Bug 4: 移除了抛错的 self.scheduler.remove_job()，用刷新代替
             self.data_handler.data["rsshub_endpoints"].pop(idx)
             self.data_handler.save_data()
+            self._fresh_asyncIOScheduler()
             yield event.plain_result("删除成功")
 
     @rss.command("add")
@@ -561,9 +560,13 @@ class RssPlugin(Star):
         if not rss_items:
             yield event.plain_result("没有新的订阅内容")
             return
-        item = rss_items[0]
-        # 分解MessageSesion
-        platform_name,message_type,session_id = event.unified_msg_origin.split(":")
+        # 修复倒序索引取值问题，取 [-1] 也就是最新内容
+        item = rss_items[-1]
+
+        # 修复 Bug 1: 预防由于 Session 格式引发的崩溃
+        user_parts = event.unified_msg_origin.split(":")
+        platform_name = user_parts[0] if len(user_parts) > 0 else ""
+
         # 构造返回消息链
         comps = await self._get_chain_components(item)
         # 区分平台
