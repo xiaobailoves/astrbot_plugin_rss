@@ -236,7 +236,7 @@ class RssPlugin(Star):
                 else:
                     # 根据 link 判断是否为新内容
                     if link != after_link:
-                        rss_items.  (
+                        rss_items.append(
                             RSSItem(chan_title, title, link, description, "", 0, pic_url_list)
                         )
                         cnt += 1
@@ -248,7 +248,7 @@ class RssPlugin(Star):
             except Exception as e:
                 self.logger.error(f"rss: 解析Rss条目 {url} 失败: {str(e)}")
                 continue
-            
+        
         rss_items.reverse()
         return rss_items
 
