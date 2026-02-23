@@ -19,10 +19,10 @@ from typing import List
 
 @register(
     "astrbot_plugin_rss",
-    "Soulter",
+    "Xiaobailoves",
     "RSS订阅插件",
-    "1.1.0",
-    "https://github.com/Soulter/astrbot_plugin_rss",
+    "1.2.0",
+    "https://github.com/xiaobailoves/astrbot_plugin_rss",
 )
 class RssPlugin(Star):
     # 增加一个类变量，用于存储调度器实例，防止热重载时产生多个定时器泄漏（幽灵任务）
