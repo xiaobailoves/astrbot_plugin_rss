@@ -16,7 +16,7 @@ class RssImageHandler:
             proxy (str): 代理地址，例如 'http://127.0.0.1:7890'。
         """
         self.is_adjust_pic = is_adjust_pic
-        self.proxy = 'http://127.0.0.1:7890'
+        self.proxy = proxy
 
     async def modify_corner_pixel_to_base64(self, image_url, color=(255, 255, 255)):
         """

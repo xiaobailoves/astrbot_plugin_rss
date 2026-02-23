@@ -46,9 +46,11 @@ class RssPlugin(Star):
         self.is_adjust_pic= config.get("pic_config").get("is_adjust_pic")
         self.max_pic_item = config.get("pic_config").get("max_pic_item")
         self.is_compose = config.get("compose")
+        self.proxy = config.get("proxy", None) # 新增代理配置
 
         # 修复 Bug 5: 移除了重复初始化的 pic_handler
-        self.pic_handler = RssImageHandler(self.is_adjust_pic)
+        # 传入代理配置
+        self.pic_handler = RssImageHandler(self.is_adjust_pic, proxy=self.proxy)
         
         # --- 修复定时任务重复触发（泄漏）的 Bug ---
         # 如果之前已经有调度器在运行（通常是因为热重载插件），先将其强制关闭
@@ -88,7 +90,7 @@ class RssPlugin(Star):
                                         timeout=timeout,
                                         headers=headers
                                         ) as session:
-                async with session.get(url) as resp:
+                async with session.get(url, proxy=self.proxy) as resp: # 增加 proxy 参数
                     if resp.status != 200:
                         self.logger.error(f"rss: 无法正常打开站点 {url}")
                         return None
