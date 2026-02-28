@@ -334,7 +334,7 @@ class RssPlugin(Star):
         self.data_handler.save_data()
         return self.data_handler.data[url]["info"]
 
-async def _get_chain_components(self, item: RSSItem):
+    async def _get_chain_components(self, item: RSSItem):
         """组装消息链"""
         import time 
         
@@ -380,7 +380,6 @@ async def _get_chain_components(self, item: RSSItem):
                     comps.append(Comp.Image.fromBase64(base64str))
                     
         return comps
-
 
     def _is_url_or_ip(self,text: str) -> bool:
         """
