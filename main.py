@@ -335,52 +335,68 @@ class RssPlugin(Star):
         return self.data_handler.data[url]["info"]
 
     async def _get_chain_components(self, item: RSSItem):
-        """组装消息链"""
-        import time 
+        """组装消息链（已修复时间与排版）"""
+        from datetime import datetime, timezone, timedelta
         
         comps = []
+        text_parts = [] # 使用列表收集所有文本，最后一次性拼接，解决换行丢失问题
+        
         # 1. 醒目的头部：频道名称
-        comps.append(Comp.Plain(f"📰 【{item.chan_title}】\n"))
-        comps.append(Comp.Plain("\n━━━━━━━━━━━━━━\n"))
+        text_parts.append(f"📰 【{item.chan_title}】")
+        text_parts.append("────────────────") # 替换为较轻量的分割线
         
-        # 2. 标题
-        if item.title and item.title != "无标题":
-            comps.append(Comp.Plain(f"\n📌 {item.title}\n"))
+        # 2. 预处理标题和正文（去除首尾多余空格和空行）
+        title = item.title.strip() if item.title else ""
+        desc = item.description.strip() if item.description else ""
+        
+        # 3. 标题与正文去重处理
+        # 很多RSS源（如推特）的标题和正文是一样的，避免重复输出“desuwa!?”
+        if title and title != "无标题" and title != desc:
+            text_parts.append(f"📌 {title}")
 
-        # 3. 来源链接
-        if not self.is_hide_url and item.link:
-            comps.append(Comp.Plain(f"\n🔗 {item.link}\n"))
-
-        # 4. 友好的发布时间
-        if item.pubDate_timestamp > 0:
-            formatted_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(item.pubDate_timestamp))
-            comps.append(Comp.Plain(f"\n🕒 {formatted_time}\n"))
-        elif item.pub_date:
-            comps.append(Comp.Plain(f"\n🕒 {item.pub_date}\n"))
+        # 4. 正文描述
+        if desc:
+            text_parts.append(f"{desc}")
             
-        comps.append(Comp.Plain("\n━━━━━━━━━━━━━━\n"))
+        text_parts.append("────────────────")
         
-        # 5. 正文描述（自动清理首尾多余的空行和空格）
-        if item.description:
-            clean_desc = item.description.strip()
-            if clean_desc:
-                comps.append(Comp.Plain(f"{clean_desc}\n"))
+        # 5. 【核心修复】友好的发布时间 (强制使用东八区 UTC+8)
+        # 设定一个固定的东八区时区，绕开服务器系统的本地时区设置
+        tz_utc_8 = timezone(timedelta(hours=8))
         
-        # 6. 图片处理
+        if item.pubDate_timestamp > 0:
+            # 将时间戳强制按标准UTC解析，然后转换为我们设定的东八区
+            dt = datetime.fromtimestamp(item.pubDate_timestamp, tz=timezone.utc).astimezone(tz_utc_8)
+            formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+            text_parts.append(f"🕒 {formatted_time}")
+        elif item.pub_date:
+            # 兜底选项：如果没有时间戳只有字符串，直接输出
+            text_parts.append(f"🕒 {item.pub_date}")
+
+        # 6. 来源链接 (把超长链接移到文本最下方，防止破坏上方排版)
+        if not self.is_hide_url and item.link:
+            text_parts.append(f"🔗 {item.link}")
+
+        # === 合并所有文本组件 ===
+        # 将上面收集的所有文本用换行符(\n)连接成一个完整的字符串
+        # 彻底避免多个 Comp.Plain 拼接时导致的排版挤压和换行失效问题
+        full_text = "\n".join(text_parts)
+        comps.append(Comp.Plain(full_text))
+
+        # 7. 图片处理 (保留原逻辑)
         if self.is_read_pic and item.pic_urls:
             temp_max_pic_item = len(item.pic_urls) if self.max_pic_item == -1 else self.max_pic_item
             for pic_url in item.pic_urls[:temp_max_pic_item]:
                 base64str = await self.pic_handler.modify_corner_pixel_to_base64(pic_url)
                 if base64str is None:
-                    comps.append(Comp.Plain("\n[图片加载失败]\n"))
+                    comps.append(Comp.Plain("\n[图片加载失败]"))
                     continue
                 else:
-                    # 在图片前增加换行，防止与文字紧贴
-                    comps.append(Comp.Plain("\n"))
+                    comps.append(Comp.Plain("\n")) # 换行防粘连
                     comps.append(Comp.Image.fromBase64(base64str))
                     
         return comps
-
+    
     def _is_url_or_ip(self,text: str) -> bool:
         """
         判断一个字符串是否为网址（http/https 开头）或 IP 地址。
