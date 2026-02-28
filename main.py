@@ -347,18 +347,6 @@ class RssPlugin(Star):
         text_parts.append(f"📰 【{item.chan_title}】")
         text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")# 替换为较轻量的分割线
         
-        title = item.title.strip() if item.title else ""
-        desc = item.description.strip() if item.description else ""
-
-        display_desc = desc
-        if is_rt:
-            # 将 "RT " 替换为图标，并尝试截断过于冗长的博主后缀（以空格或特定符号分割）
-            display_desc = display_desc.replace("RT ", "🔄 转发自: ").replace("RT ", "🔄 转发自: ")
-
-        show_title = True
-        if title and desc.startswith(title[:15]):
-            show_title = False
-        
         # 4. 【核心修复】友好的发布时间 (强制使用东八区 UTC+8)
         # 设定一个固定的东八区时区，绕开服务器系统的本地时区设置
         tz_utc_8 = timezone(timedelta(hours=8))
@@ -407,6 +395,17 @@ class RssPlugin(Star):
 
         text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
+        title = item.title.strip() if item.title else ""
+        desc = item.description.strip() if item.description else ""
+
+        display_desc = desc
+        if is_rt:
+            # 将 "RT " 替换为图标，并尝试截断过于冗长的博主后缀（以空格或特定符号分割）
+            display_desc = display_desc.replace("RT ", "🔄 转发自: ").replace("RT ", "🔄 转发自: ")
+
+        show_title = True
+        if title and desc.startswith(title[:15]):
+            show_title = False
         # 3. 标题与正文逻辑处理
         # 如果标题存在且不是“无标题”
         if show_title and title != "无标题" and not desc.startswith(title[:10]):
