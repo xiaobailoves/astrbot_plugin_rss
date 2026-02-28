@@ -343,7 +343,7 @@ class RssPlugin(Star):
         
         # 1. 醒目的头部：频道名称
         text_parts.append(f"📰 【{item.chan_title}】")
-        text_parts.append("────────────────") # 替换为较轻量的分割线
+        text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")# 替换为较轻量的分割线
         
         # 2. 预处理标题和正文（去除首尾多余空格和空行）
         title = item.title.strip() if item.title else ""
@@ -356,25 +356,54 @@ class RssPlugin(Star):
 
         # 4. 正文描述
         if desc:
-            text_parts.append(f"{desc}")
+            text_parts.append(f"💬 {desc}")
             
-        text_parts.append("────────────────")
+        text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
         # 5. 【核心修复】友好的发布时间 (强制使用东八区 UTC+8)
         # 设定一个固定的东八区时区，绕开服务器系统的本地时区设置
         tz_utc_8 = timezone(timedelta(hours=8))
+        formatted_time = ""
         
-        if item.pubDate_timestamp > 0:
-            # 将时间戳强制按标准UTC解析，然后转换为我们设定的东八区
-            dt = datetime.fromtimestamp(item.pubDate_timestamp, tz=timezone.utc).astimezone(tz_utc_8)
-            formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+        # 优先读取原始字符串，无视被上游解析错误的时间戳
+        if getattr(item, 'pub_date', None):
+            pub_date_str = str(item.pub_date).strip()
+            
+            try:
+                # 尝试 A: 如果它是完整的 RSSHub 格式 (如 Sat, 28 Feb 2026 06:37:12 GMT)
+                dt = email.utils.parsedate_to_datetime(pub_date_str)
+                formatted_time = dt.astimezone(tz_utc_8).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+                
+            if not formatted_time:
+                try:
+                    # 尝试 B: 上游瞎眼把它截断成了纯粹的 "2026-02-28 06:37:12"
+                    # 根据你的反馈，RSSHub源是GMT，所以我们将错就错，强行给这个字符串贴上 UTC 标签并 +8 小时
+                    dt = datetime.strptime(pub_date_str, "%Y-%m-%d %H:%M:%S")
+                    dt = dt.replace(tzinfo=timezone.utc).astimezone(tz_utc_8)
+                    formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    pass
+                    
+        # 尝试 C: 如果全失败了，才使用带有污染的 timestamp 进行暴力修正兜底
+        if not formatted_time and getattr(item, 'pubDate_timestamp', 0) > 0:
+            try:
+                # 获取它错误的本地字面时间，将其强行视为 UTC 时间，然后转为东八区
+                dt_naive = datetime.fromtimestamp(item.pubDate_timestamp)
+                dt_corrected = dt_naive.replace(tzinfo=timezone.utc).astimezone(tz_utc_8)
+                formatted_time = dt_corrected.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
+        # 兜底输出时间
+        if formatted_time:
             text_parts.append(f"🕒 {formatted_time}")
-        elif item.pub_date:
-            # 兜底选项：如果没有时间戳只有字符串，直接输出
+        elif getattr(item, 'pub_date', None):
             text_parts.append(f"🕒 {item.pub_date}")
 
-        # 6. 来源链接 (把超长链接移到文本最下方，防止破坏上方排版)
-        if not self.is_hide_url and item.link:
+        # 6. 来源链接 (放置底部防止排版被破坏)
+        if not getattr(self, 'is_hide_url', False) and getattr(item, 'link', None):
             text_parts.append(f"🔗 {item.link}")
 
         # === 合并所有文本组件 ===
