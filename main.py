@@ -341,24 +341,24 @@ class RssPlugin(Star):
         comps = []
         # 1. 醒目的头部：频道名称
         comps.append(Comp.Plain(f"📰 【{item.chan_title}】\n"))
-        comps.append(Comp.Plain("━━━━━━━━━━━━━━\n"))
+        comps.append(Comp.Plain("\n━━━━━━━━━━━━━━\n"))
         
         # 2. 标题
         if item.title and item.title != "无标题":
-            comps.append(Comp.Plain(f"📌 {item.title}\n"))
+            comps.append(Comp.Plain(f"\n📌 {item.title}\n"))
 
         # 3. 来源链接
         if not self.is_hide_url and item.link:
-            comps.append(Comp.Plain(f"🔗 {item.link}\n"))
+            comps.append(Comp.Plain(f"\n🔗 {item.link}\n"))
 
         # 4. 友好的发布时间
         if item.pubDate_timestamp > 0:
             formatted_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(item.pubDate_timestamp))
-            comps.append(Comp.Plain(f"🕒 {formatted_time}\n"))
+            comps.append(Comp.Plain(f"\n🕒 {formatted_time}\n"))
         elif item.pub_date:
-            comps.append(Comp.Plain(f"🕒 {item.pub_date}\n"))
+            comps.append(Comp.Plain(f"\n🕒 {item.pub_date}\n"))
             
-        comps.append(Comp.Plain("━━━━━━━━━━━━━━\n"))
+        comps.append(Comp.Plain("\n━━━━━━━━━━━━━━\n"))
         
         # 5. 正文描述（自动清理首尾多余的空行和空格）
         if item.description:
@@ -372,7 +372,7 @@ class RssPlugin(Star):
             for pic_url in item.pic_urls[:temp_max_pic_item]:
                 base64str = await self.pic_handler.modify_corner_pixel_to_base64(pic_url)
                 if base64str is None:
-                    comps.append(Comp.Plain("\n[图片加载失败]"))
+                    comps.append(Comp.Plain("\n[图片加载失败]\n"))
                     continue
                 else:
                     # 在图片前增加换行，防止与文字紧贴
