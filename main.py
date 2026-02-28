@@ -401,7 +401,7 @@ class RssPlugin(Star):
         # 3. 标题与正文逻辑处理
         # 如果标题存在且不是“无标题”
         if title and title != "无标题" and not desc.startswith(title[:10]):
-            text_parts.append(f"📌 {title}\n")
+            text_parts.append(f"📌 {title}")
         if desc:
             # 给话题标签前后增加空格，或者单独换行（可选）
             desc = desc.replace("#", "\n#") 
@@ -460,19 +460,37 @@ class RssPlugin(Star):
             self.data_handler.save_data()
             yield event.plain_result("添加成功")
 
-    @rsshub.command("list")
+    @rss.command("list")
     async def rsshub_list(self, event: AstrMessageEvent):
-        ret = "当前Bot添加的rsshub endpoint：\n"
-        yield event.plain_result(
-            ret
-            + "\n".join(
-                [
-                    f"{i}: {x}"
-                    for i, x in enumerate(self.data_handler.data["rsshub_endpoints"])
-                ]
-            )
-        )
+        user = event.unified_msg_origin
+        subs_urls = self.data_handler.get_subs_channel_url(user)
+        if not subs_urls:
+            yield event.plain_result("当前没有任何订阅。")
+            return
+            
+        ret = "📋 当前订阅列表：\n"
+        for i, url in enumerate(subs_urls):
+            info = self.data_handler.data[url]["info"]
+            cron = self.data_handler.data[url]["subscribers"][user].get("cron_expr", "* * * * *")
+            ret += f"{i}. 【{info['title']}】\n   周期: `{cron}`\n"
+        yield event.plain_result(ret.strip())
 
+    @rss.command("update")
+    async def update_command(self, event: AstrMessageEvent, idx: int, minute: str, hour: str, day: str, month: str, day_of_week: str):
+        """修改已有订阅的周期"""
+        user = event.unified_msg_origin
+        subs_urls = self.data_handler.get_subs_channel_url(user)
+        if idx < 0 or idx >= len(subs_urls):
+            yield event.plain_result("索引错误。")
+            return
+            
+        url = subs_urls[idx]
+        new_cron = f"{minute} {hour} {day} {month} {day_of_week}"
+        self.data_handler.data[url]["subscribers"][user]["cron_expr"] = new_cron
+        self.data_handler.save_data()
+        self._fresh_asyncIOScheduler()
+        yield event.plain_result(f"✅ 更新成功！\n频道: {self.data_handler.data[url]['info']['title']}\n新周期: `{new_cron}`")
+        
     @rsshub.command("remove")
     async def rsshub_remove(self, event: AstrMessageEvent, idx: int):
         if idx < 0 or idx >= len(self.data_handler.data["rsshub_endpoints"]):
