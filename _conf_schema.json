@@ -40,9 +40,9 @@
         "default": false
     },
     "proxy": {
-        "description": "代理地址 (如 http://127.0.0.1:7890)",
+        "description": "图片代理地址 (如 http://127.0.0.1:7890)",
         "type": "string",
-        "hint": "配置拉取RSS和图片时使用的代理地址。留空则尝试使用系统代理。",
+        "hint": "仅配置拉取图片时使用的代理地址（拉取RSS信息为直连）。留空则尝试使用系统代理。",
         "obvious_hint": true,
         "default": ""
     },
