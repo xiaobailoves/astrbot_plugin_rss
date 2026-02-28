@@ -460,22 +460,20 @@ class RssPlugin(Star):
             self.data_handler.save_data()
             yield event.plain_result("添加成功")
 
-    @rss.command("list")
+    @rsshub.command("list")
     async def rsshub_list(self, event: AstrMessageEvent):
-        user = event.unified_msg_origin
-        subs_urls = self.data_handler.get_subs_channel_url(user)
-        if not subs_urls:
-            yield event.plain_result("当前没有任何订阅。")
-            return
-            
-        ret = "📋 当前订阅列表：\n"
-        for i, url in enumerate(subs_urls):
-            info = self.data_handler.data[url]["info"]
-            cron = self.data_handler.data[url]["subscribers"][user].get("cron_expr", "* * * * *")
-            ret += f"{i}. 【{info['title']}】\n   周期: `{cron}`\n"
-        yield event.plain_result(ret.strip())
+        ret = "当前Bot添加的rsshub endpoint：\n"
+        yield event.plain_result(
+            ret
+            + "\n".join(
+                [
+                    f"{i}: {x}"
+                    for i, x in enumerate(self.data_handler.data["rsshub_endpoints"])
+                ]
+            )
+        )
 
-    @rss.command("update")
+    @rsshub.command("update")
     async def update_command(self, event: AstrMessageEvent, idx: int, minute: str, hour: str, day: str, month: str, day_of_week: str):
         """修改已有订阅的周期"""
         user = event.unified_msg_origin
@@ -490,7 +488,7 @@ class RssPlugin(Star):
         self.data_handler.save_data()
         self._fresh_asyncIOScheduler()
         yield event.plain_result(f"✅ 更新成功！\n频道: {self.data_handler.data[url]['info']['title']}\n新周期: `{new_cron}`")
-        
+
     @rsshub.command("remove")
     async def rsshub_remove(self, event: AstrMessageEvent, idx: int):
         if idx < 0 or idx >= len(self.data_handler.data["rsshub_endpoints"]):
@@ -566,18 +564,21 @@ class RssPlugin(Star):
         yield event.plain_result(
             f"添加成功。频道信息：\n标题: {chan_title}\n描述: {chan_desc}"
         )
+        
 
     @rss.command("list")
     async def list_command(self, event: AstrMessageEvent):
         user = event.unified_msg_origin
-        ret = "当前订阅的频道：\n"
         subs_urls = self.data_handler.get_subs_channel_url(user)
-        cnt = 0
-        for url in subs_urls:
+        if not subs_urls:
+            yield event.plain_result("当前没有任何订阅。")
+            return
+        ret = "📋 当前订阅列表：\n"
+        for i, url in enumerate(subs_urls):
             info = self.data_handler.data[url]["info"]
-            ret += f"{cnt}. {info['title']} - {info['description']}\n"
-            cnt += 1
-        yield event.plain_result(ret)
+            cron = self.data_handler.data[url]["subscribers"][user].get("cron_expr", "* * * * *")
+            ret += f"{i}. 【{info['title']}】\n   周期: `{cron}`\n"
+        yield event.plain_result(ret.strip())
 
     @rss.command("remove")
     async def remove_command(self, event: AstrMessageEvent, idx: int):
