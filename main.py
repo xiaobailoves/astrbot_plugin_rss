@@ -334,22 +334,51 @@ class RssPlugin(Star):
         self.data_handler.save_data()
         return self.data_handler.data[url]["info"]
 
-    async def _get_chain_components(self, item: RSSItem):
+async def _get_chain_components(self, item: RSSItem):
         """组装消息链"""
+        import time 
+        
         comps = []
-        comps.append(Comp.Plain(f"频道 {item.chan_title} 最新 Feed\n---\n标题: {item.title}\n---\n"))
-        if not self.is_hide_url:
-            comps.append(Comp.Plain(f"链接: {item.link}\n---\n"))
-        comps.append(Comp.Plain(item.description+"\n---\n"))
+        # 1. 醒目的头部：频道名称
+        comps.append(Comp.Plain(f"📰 【{item.chan_title}】\n"))
+        comps.append(Comp.Plain("━━━━━━━━━━━━━━\n"))
+        
+        # 2. 标题
+        if item.title and item.title != "无标题":
+            comps.append(Comp.Plain(f"📌 {item.title}\n"))
+
+        # 3. 来源链接
+        if not self.is_hide_url and item.link:
+            comps.append(Comp.Plain(f"🔗 {item.link}\n"))
+
+        # 4. 友好的发布时间
+        if item.pubDate_timestamp > 0:
+            formatted_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(item.pubDate_timestamp))
+            comps.append(Comp.Plain(f"🕒 {formatted_time}\n"))
+        elif item.pub_date:
+            comps.append(Comp.Plain(f"🕒 {item.pub_date}\n"))
+            
+        comps.append(Comp.Plain("━━━━━━━━━━━━━━\n"))
+        
+        # 5. 正文描述（自动清理首尾多余的空行和空格）
+        if item.description:
+            clean_desc = item.description.strip()
+            if clean_desc:
+                comps.append(Comp.Plain(f"{clean_desc}\n"))
+        
+        # 6. 图片处理
         if self.is_read_pic and item.pic_urls:
             temp_max_pic_item = len(item.pic_urls) if self.max_pic_item == -1 else self.max_pic_item
             for pic_url in item.pic_urls[:temp_max_pic_item]:
                 base64str = await self.pic_handler.modify_corner_pixel_to_base64(pic_url)
                 if base64str is None:
-                    comps.append(Comp.Plain("图片链接读取失败\n"))
+                    comps.append(Comp.Plain("\n[图片加载失败]"))
                     continue
                 else:
+                    # 在图片前增加换行，防止与文字紧贴
+                    comps.append(Comp.Plain("\n"))
                     comps.append(Comp.Image.fromBase64(base64str))
+                    
         return comps
 
 
