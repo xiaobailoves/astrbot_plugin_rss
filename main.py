@@ -481,6 +481,22 @@ class RssPlugin(Star):
             )
         )
 
+    @rsshub.command("update")
+    async def update_command(self, event: AstrMessageEvent, idx: int, minute: str, hour: str, day: str, month: str, day_of_week: str):
+        """修改已有订阅的周期"""
+        user = event.unified_msg_origin
+        subs_urls = self.data_handler.get_subs_channel_url(user)
+        if idx < 0 or idx >= len(subs_urls):
+            yield event.plain_result("索引错误。")
+            return
+            
+        url = subs_urls[idx]
+        new_cron = f"{minute} {hour} {day} {month} {day_of_week}"
+        self.data_handler.data[url]["subscribers"][user]["cron_expr"] = new_cron
+        self.data_handler.save_data()
+        self._fresh_asyncIOScheduler()
+        yield event.plain_result(f"✅ 更新成功！\n频道: {self.data_handler.data[url]['info']['title']}\n新周期: `{new_cron}`")
+
     @rsshub.command("remove")
     async def rsshub_remove(self, event: AstrMessageEvent, idx: int):
         if idx < 0 or idx >= len(self.data_handler.data["rsshub_endpoints"]):
@@ -588,20 +604,6 @@ class RssPlugin(Star):
 
         self._fresh_asyncIOScheduler()
         yield event.plain_result("删除成功")
-
-    @rss.command("update")
-    async def update_command(self, event: AstrMessageEvent, idx: int, minute: str, hour: str, day: str, month: str, day_of_week: str):
-        user = event.unified_msg_origin
-        subs_urls = self.data_handler.get_subs_channel_url(user)
-        if idx < 0 or idx >= len(subs_urls):
-            yield event.plain_result("索引错误。")
-            return
-        url = subs_urls[idx]
-        new_cron = f"{minute} {hour} {day} {month} {day_of_week}"
-        self.data_handler.data[url]["subscribers"][user]["cron_expr"] = new_cron
-        self.data_handler.save_data()
-        self._fresh_asyncIOScheduler()
-        yield event.plain_result(f"✅ 更新成功！\n频道: {self.data_handler.data[url]['info']['title']}\n新周期: `{new_cron}`")
 
     @rss.command("get")
     async def get_command(self, event: AstrMessageEvent, idx: int):
