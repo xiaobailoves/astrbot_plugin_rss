@@ -342,7 +342,6 @@ class RssPlugin(Star):
         text_parts = [] # 使用列表收集所有文本，最后一次性拼接，解决换行丢失问题
         
         # 1. 醒目的头部：频道名称
-        is_rt = title.upper().startswith("RT") or desc.upper().startswith("RT")
         source_name = item.chan_title.replace("Twitter @", "🐦 ").strip()
         text_parts.append(f"📰 【{item.chan_title}】")
         text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")# 替换为较轻量的分割线
@@ -398,22 +397,14 @@ class RssPlugin(Star):
         title = item.title.strip() if item.title else ""
         desc = item.description.strip() if item.description else ""
 
-        display_desc = desc
-        if is_rt:
-            # 将 "RT " 替换为图标，并尝试截断过于冗长的博主后缀（以空格或特定符号分割）
-            display_desc = display_desc.replace("RT ", "🔄 转发自: ").replace("RT ", "🔄 转发自: ")
-
-        show_title = True
-        if title and desc.startswith(title[:15]):
-            show_title = False
         # 3. 标题与正文逻辑处理
         # 如果标题存在且不是“无标题”
-        if show_title and title != "无标题" and not desc.startswith(title[:10]):
+        if title and title != "无标题" and not desc.startswith(title[:10]):
             text_parts.append(f"📌 {title}")
-        if display_desc:
+        if desc:
             # 给话题标签前后增加空格，或者单独换行（可选）
-            display_desc = display_desc.replace("#", "\n#") 
-            text_parts.append(f"💬 {display_desc}")
+            desc = desc.replace("#", "\n#") 
+            text_parts.append(f"💬 {desc}")
 
         # === 合并所有文本组件 ===
         # 将上面收集的所有文本用换行符(\n)连接成一个完整的字符串
