@@ -342,7 +342,7 @@ class RssPlugin(Star):
         text_parts = [] # 使用列表收集所有文本，最后一次性拼接，解决换行丢失问题
         
         # 1. 醒目的头部：频道名称
-        display_chan = item.chan_title.replace("Twitter @", "🐦 ").strip()
+        source_name = item.chan_title.replace("Twitter @", "🐦 ").strip()
         text_parts.append(f"📰 【{item.chan_title}】")
         text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")# 替换为较轻量的分割线
         
@@ -394,26 +394,18 @@ class RssPlugin(Star):
 
         text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        # 2. 标题与正文去重逻辑
+        # 2. 预处理标题和正文（去除首尾多余空格和空行）
         title = item.title.strip() if item.title else ""
         desc = item.description.strip() if item.description else ""
         
-        # 【去重核心】：如果正文以标题开头，删除正文中重复的部分
-        # 注意：RSSHub 经常会截断标题加 "..."，这里做模糊匹配处理
-        clean_title = title.rstrip('.') 
-        if desc.startswith(clean_title):
-            # 只保留正文中标题之后的内容
-            desc = desc[len(clean_title):].strip()
-            # 移除正文开头可能残余的标点符号
-            desc = re.sub(r'^[:：\s,，.。]+', '', desc)
-
-        if title and title != "无标题":
-            text_parts.append(f"📌 {title}")
-        
+        # 3. 标题与正文逻辑处理
+        # 如果标题存在且不是“无标题”
+        if title and title != "无标题" and not desc.startswith(title[:10]):
+            text_parts.append(f"📌 {title}\n")
         if desc:
-            # 如果标题和正文不完全一致，才添加正文
-            if desc != title:
-                text_parts.append(f"\n💬 {desc}")
+            # 给话题标签前后增加空格，或者单独换行（可选）
+            desc = desc.replace("#", "\n#") 
+            text_parts.append(f"💬 {desc}")
 
         # === 合并所有文本组件 ===
         # 将上面收集的所有文本用换行符(\n)连接成一个完整的字符串
