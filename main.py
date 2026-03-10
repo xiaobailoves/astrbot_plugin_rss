@@ -42,14 +42,26 @@ class RssPlugin(Star):
         self.max_items_per_poll = config.get("max_items_per_poll")
         self.t2i = config.get("t2i")
         self.is_hide_url = config.get("is_hide_url")
-        self.is_read_pic= config.get("pic_config").get("is_read_pic")
-        self.is_adjust_pic= config.get("pic_config").get("is_adjust_pic")
-        self.max_pic_item = config.get("pic_config").get("max_pic_item")
         self.is_compose = config.get("compose")
         self.proxy = config.get("proxy", None) # 新增代理配置
 
-        # 传入代理配置给图片处理器，这里保留代理
-        self.pic_handler = RssImageHandler(self.is_adjust_pic, proxy=self.proxy)
+        # 提取图片配置 (兼容旧版本配置可能不存在新 key 的情况)
+        pic_config = config.get("pic_config", {})
+        if pic_config is None:
+            pic_config = {}
+        self.is_read_pic = pic_config.get("is_read_pic", False)
+        self.is_adjust_pic = pic_config.get("is_adjust_pic", False)
+        self.max_pic_item = pic_config.get("max_pic_item", 3)
+        self.use_twitter_reverse_proxy = pic_config.get("use_twitter_reverse_proxy", False)
+        self.twitter_reverse_proxy_domain = pic_config.get("twitter_reverse_proxy_domain", "pbs.yurucamp.cn")
+
+        # 传入代理配置给图片处理器，增加反代相关参数
+        self.pic_handler = RssImageHandler(
+            self.is_adjust_pic, 
+            proxy=self.proxy,
+            use_twitter_reverse_proxy=self.use_twitter_reverse_proxy,
+            twitter_reverse_proxy_domain=self.twitter_reverse_proxy_domain
+        )
         
         # --- 修复定时任务重复触发（泄漏）的 Bug ---
         if RssPlugin._shared_scheduler is not None and RssPlugin._shared_scheduler.running:
@@ -337,6 +349,7 @@ class RssPlugin(Star):
     async def _get_chain_components(self, item: RSSItem):
         """组装消息链（已修复时间与排版）"""
         from datetime import datetime, timezone, timedelta
+        import email.utils
         
         comps = []
         text_parts = [] # 使用列表收集所有文本，最后一次性拼接，解决换行丢失问题

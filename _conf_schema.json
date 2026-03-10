@@ -68,6 +68,18 @@
                 "type": "int",
                 "hint": "每次转换图片的最大条目数。 -1 表示不限制。",
                 "default": 3
+            },
+            "use_twitter_reverse_proxy": {
+                "description": "是否使用推特图片反代",
+                "type": "bool",
+                "hint": "开启后，会将推特图片域名(pbs.twimg.com)替换为下方配置的反代域名，并且强制直连获取该图片。",
+                "default": false
+            },
+            "twitter_reverse_proxy_domain": {
+                "description": "推特图片反代域名",
+                "type": "string",
+                "hint": "例如：pbs.yurucamp.cn",
+                "default": "pbs.yurucamp.cn"
             }
         }
     }
