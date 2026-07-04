@@ -370,22 +370,22 @@ class RssPlugin(Star):
         return self.data_handler.data[url]["info"]
 
     def _format_time(self, item: RSSItem) -> str:
-        “””格式化发布时间为东八区友好的字符串”””
+        """格式化发布时间为东八区友好的字符串"""
         tz_utc_8 = timezone(timedelta(hours=8))
-        formatted_time = “”
+        formatted_time = ""
 
         if item.pub_date:
             pub_date_str = str(item.pub_date).strip()
             try:
                 dt = email.utils.parsedate_to_datetime(pub_date_str)
-                formatted_time = dt.astimezone(tz_utc_8).strftime(“%Y-%m-%d %H:%M:%S”)
+                formatted_time = dt.astimezone(tz_utc_8).strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
                 pass
             if not formatted_time:
                 try:
-                    dt = datetime.strptime(pub_date_str, “%Y-%m-%d %H:%M:%S”)
+                    dt = datetime.strptime(pub_date_str, "%Y-%m-%d %H:%M:%S")
                     dt = dt.replace(tzinfo=timezone.utc).astimezone(tz_utc_8)
-                    formatted_time = dt.strftime(“%Y-%m-%d %H:%M:%S”)
+                    formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
                     pass
 
@@ -393,43 +393,43 @@ class RssPlugin(Star):
             try:
                 dt_naive = datetime.fromtimestamp(item.pubDate_timestamp)
                 dt_corrected = dt_naive.replace(tzinfo=timezone.utc).astimezone(tz_utc_8)
-                formatted_time = dt_corrected.strftime(“%Y-%m-%d %H:%M:%S”)
+                formatted_time = dt_corrected.strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
                 pass
 
         return formatted_time
 
     def _build_text_body(self, item: RSSItem) -> str:
-        “””构建消息文本主体”””
+        """构建消息文本主体"""
         text_parts = []
 
-        text_parts.append(f”📰 【{item.chan_title}】”)
-        text_parts.append(“━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━”)
+        text_parts.append(f"\U0001f4f0 【{item.chan_title}】")
+        text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
         formatted_time = self._format_time(item)
         if formatted_time:
-            text_parts.append(f”🕒 {formatted_time}”)
+            text_parts.append(f"\U0001f552 {formatted_time}")
         elif item.pub_date:
-            text_parts.append(f”🕒 {item.pub_date}”)
+            text_parts.append(f"\U0001f552 {item.pub_date}")
 
         if not self.is_hide_url and item.link:
-            text_parts.append(f”🔗 {item.link}”)
+            text_parts.append(f"\U0001f517 {item.link}")
 
-        text_parts.append(“━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━”)
+        text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        title = item.title.strip() if item.title else “”
-        desc = item.description.strip() if item.description else “”
+        title = item.title.strip() if item.title else ""
+        desc = item.description.strip() if item.description else ""
 
-        if title and title != “无标题” and not desc.startswith(title[:10]):
-            text_parts.append(f”📌 {title}”)
+        if title and title != "无标题" and not desc.startswith(title[:10]):
+            text_parts.append(f"\U0001f4cc {title}")
         if desc:
-            desc = desc.replace(“#”, “\n#”)
-            text_parts.append(f”💬 {desc}”)
+            desc = desc.replace("#", "\n#")
+            text_parts.append(f"\U0001f4ac {desc}")
 
-        return “\n”.join(text_parts)
+        return "\n".join(text_parts)
 
     async def _fetch_images(self, item: RSSItem) -> list:
-        “””并行下载 RSS 条目的图片，返回 Image 组件列表”””
+        """并行下载 RSS 条目的图片，返回 Image 组件列表"""
         comps = []
         if self.is_read_pic and item.pic_urls:
             temp_max_pic_item = len(item.pic_urls) if self.max_pic_item == -1 else self.max_pic_item
@@ -440,14 +440,14 @@ class RssPlugin(Star):
             )
             for base64str in results:
                 if base64str is None or isinstance(base64str, Exception):
-                    comps.append(Comp.Plain(“\n[图片加载失败]”))
+                    comps.append(Comp.Plain("\n[图片加载失败]"))
                 else:
-                    comps.append(Comp.Plain(“\n”))
+                    comps.append(Comp.Plain("\n"))
                     comps.append(Comp.Image.fromBase64(base64str))
         return comps
 
     async def _get_chain_components(self, item: RSSItem):
-        “””组装消息链”””
+        """组装消息链"""
         comps = []
         text = self._build_text_body(item)
         comps.append(Comp.Plain(text))
