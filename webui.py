@@ -228,8 +228,6 @@ class RssWebUI:
             items = await self.plugin.poll_rss(url)
         except Exception as e:
             return self._json({"error": f"拉取失败: {e}"}, 500)
-        # poll_rss 内部做了 reverse() 导致旧→新，这里翻回来确保新→旧
-        items.reverse()
         result = []
         for item in items:
             result.append(
@@ -242,6 +240,7 @@ class RssWebUI:
                     "pic_urls": item.pic_urls,
                 }
             )
+        # 按时间戳降序（最新在前），无时间戳的自然排到最后
         result.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
         return self._json({"url": url, "count": len(result), "items": result})
 
