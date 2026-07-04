@@ -374,8 +374,8 @@ class RssPlugin(Star):
         tz_utc_8 = timezone(timedelta(hours=8))
         formatted_time = ""
 
-        if item.pub_date:
-            pub_date_str = str(item.pub_date).strip()
+        if item.pubDate:
+            pub_date_str = str(item.pubDate).strip()
             try:
                 dt = email.utils.parsedate_to_datetime(pub_date_str)
                 formatted_time = dt.astimezone(tz_utc_8).strftime("%Y-%m-%d %H:%M:%S")
@@ -409,8 +409,8 @@ class RssPlugin(Star):
         formatted_time = self._format_time(item)
         if formatted_time:
             text_parts.append(f"\U0001f552 {formatted_time}")
-        elif item.pub_date:
-            text_parts.append(f"\U0001f552 {item.pub_date}")
+        elif item.pubDate:
+            text_parts.append(f"\U0001f552 {item.pubDate}")
 
         if not self.is_hide_url and item.link:
             text_parts.append(f"\U0001f517 {item.link}")
