@@ -4,14 +4,18 @@
         "type": "int",
         "hint": "推送的标题最大长度。",
         "obvious_hint": true,
-        "default": 30
+        "default": 30,
+        "minimum": 1,
+        "maximum": 200
     },
     "description_max_length": {
         "description": "推送的描述最大长度，超过会被截取",
         "type": "int",
         "hint": "推送的描述最大长度。",
         "obvious_hint": true,
-        "default": 500
+        "default": 500,
+        "minimum": 1,
+        "maximum": 10000
     },
     "compose": {
         "description": "（仅限qq）是否将消息合并，以转发的方式组合发送",
@@ -30,7 +34,9 @@
         "type": "int",
         "hint": "每次获取的最大条目数。 -1 表示不限制。",
         "obvious_hint": true,
-        "default": 3
+        "default": 3,
+        "minimum": -1,
+        "maximum": 100
     },
     "is_hide_url": {
         "description": "是否隐藏链接",
@@ -46,11 +52,18 @@
         "obvious_hint": true,
         "default": ""
     },
+    "verify_ssl": {
+        "description": "是否验证HTTPS证书",
+        "type": "bool",
+        "hint": "如果设置为 false 则跳过 SSL 证书验证（不推荐）。",
+        "obvious_hint": true,
+        "default": true
+    },
     "pic_config": {
         "description": "图片相关配置",
         "type": "object",
         "hint": "用于配置图片相关的参数",
-        "items": {
+        "properties": {
             "is_read_pic": {
                 "description": "是否读取rss链接中的图片",
                 "hint": "如果设置为 true 自动读取rss链接中的图片",
@@ -67,7 +80,9 @@
                 "description": "每次获取的最大图片条目数。",
                 "type": "int",
                 "hint": "每次转换图片的最大条目数。 -1 表示不限制。",
-                "default": 3
+                "default": 3,
+                "minimum": -1,
+                "maximum": 50
             },
             "use_twitter_reverse_proxy": {
                 "description": "是否使用推特图片反代",

@@ -1,5 +1,7 @@
 import os
 import json
+import tempfile
+import logging
 from urllib.parse import urlparse
 from lxml import etree
 from bs4 import BeautifulSoup
@@ -27,41 +29,62 @@ class DataHandler:
         """从数据文件中加载数据"""
         if not os.path.exists(self.config_path):
             with open(self.config_path, "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.default_config, indent=2, ensure_ascii=False))
-        with open(self.config_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+                json.dump(self.default_config, f, indent=2, ensure_ascii=False)
+            return self.default_config.copy()
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            logger = logging.getLogger("astrbot")
+            logger.error(f"数据文件 {self.config_path} 已损坏，正在备份并重建...")
+            backup_path = self.config_path + ".corrupted_backup"
+            os.replace(self.config_path, backup_path)
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(self.default_config, f, indent=2, ensure_ascii=False)
+            return self.default_config.copy()
 
     def save_data(self):
-        """保存数据到数据文件"""
-        with open(self.config_path, "w", encoding="utf-8") as f:
+        """保存数据到数据文件（原子写入，防止崩溃时文件损坏）"""
+        dirname = os.path.dirname(self.config_path) or "."
+        with tempfile.NamedTemporaryFile(
+            "w", delete=False, dir=dirname, suffix=".tmp", encoding="utf-8"
+        ) as f:
             json.dump(self.data, f, indent=2, ensure_ascii=False)
+            tmp_path = f.name
+        os.replace(tmp_path, self.config_path)
 
     def parse_channel_text_info(self, text):
         """解析RSS频道信息"""
-        root = etree.fromstring(text)
-        title = root.xpath("//title")[0].text
-        description = root.xpath("//description")[0].text
-        return title, description
+        try:
+            root = etree.fromstring(text)
+            title_node = root.xpath("//title")
+            desc_node = root.xpath("//description")
+            title = title_node[0].text if title_node and title_node[0].text else "未知频道"
+            description = desc_node[0].text if desc_node and desc_node[0].text else ""
+            return title, description
+        except (etree.XMLSyntaxError, IndexError, AttributeError):
+            return "未知频道", ""
 
-    def strip_html_pic(self, html)-> list[str]:
-        """解析HTML内容，提取图片地址
-        """
+    def parse_html_text_and_pics(self, html) -> tuple:
+        """单次解析 HTML，同时提取纯文本和图片地址"""
         soup = BeautifulSoup(html, "html.parser")
         ordered_content = []
-
-        # 处理图片节点
-        for img in soup.find_all('img'):
-            img_src = img.get('src')
+        for img in soup.find_all("img"):
+            img_src = img.get("src")
             if img_src:
                 ordered_content.append(img_src)
+        text = soup.get_text()
+        return re.sub(r"\n+", "\n", text), ordered_content
 
-        return ordered_content
+    def strip_html_pic(self, html)-> list[str]:
+        """解析HTML内容，提取图片地址（已废弃，保留兼容）"""
+        _, pics = self.parse_html_text_and_pics(html)
+        return pics
 
     def strip_html(self, html):
-        """去除HTML标签"""
-        soup = BeautifulSoup(html, "html.parser")
-        text = soup.get_text()
-        return re.sub(r"\n+", "\n", text)
+        """去除HTML标签（已废弃，保留兼容）"""
+        text, _ = self.parse_html_text_and_pics(html)
+        return text
 
     def get_root_url(self, url):
         """获取URL的根域名"""

@@ -2,6 +2,8 @@ import aiohttp
 import asyncio
 import time
 import re
+from datetime import datetime, timezone, timedelta
+import email.utils
 import logging
 from lxml import etree
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -25,8 +27,9 @@ from typing import List
     "https://github.com/xiaobailoves/astrbot_plugin_rss",
 )
 class RssPlugin(Star):
-    # 增加一个类变量，用于存储调度器实例，防止热重载时产生多个定时器泄漏（幽灵任务）
+    # 类变量，用于存储共享实例，防止热重载时产生资源泄漏（幽灵任务）
     _shared_scheduler = None
+    _shared_http_session = None
 
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
@@ -44,6 +47,7 @@ class RssPlugin(Star):
         self.is_hide_url = config.get("is_hide_url")
         self.is_compose = config.get("compose")
         self.proxy = config.get("proxy", None) # 新增代理配置
+        self.verify_ssl = config.get("verify_ssl", True)
 
         # 提取图片配置 (兼容旧版本配置可能不存在新 key 的情况)
         pic_config = config.get("pic_config", {})
@@ -57,23 +61,41 @@ class RssPlugin(Star):
 
         # 传入代理配置给图片处理器，增加反代相关参数
         self.pic_handler = RssImageHandler(
-            self.is_adjust_pic, 
+            self.is_adjust_pic,
             proxy=self.proxy,
             use_twitter_reverse_proxy=self.use_twitter_reverse_proxy,
             twitter_reverse_proxy_domain=self.twitter_reverse_proxy_domain
         )
+
+        # 复用 HTTP Session，避免每次请求都重新建立连接
+        self.http_session = aiohttp.ClientSession(
+            trust_env=False,
+            connector=aiohttp.TCPConnector(ssl=False if not self.verify_ssl else None),
+            timeout=aiohttp.ClientTimeout(total=30, connect=10),
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            },
+        )
         
-        # --- 修复定时任务重复触发（泄漏）的 Bug ---
+        # --- 修复热重载时资源泄漏 ---
         if RssPlugin._shared_scheduler is not None and RssPlugin._shared_scheduler.running:
             try:
                 RssPlugin._shared_scheduler.shutdown(wait=False)
             except Exception as e:
                 self.logger.warning(f"关闭旧调度器时出现异常: {e}")
-        
-        # 创建新的调度器并保存到类变量中
+
+        if RssPlugin._shared_http_session is not None and not RssPlugin._shared_http_session.closed:
+            try:
+                asyncio.ensure_future(RssPlugin._shared_http_session.close())
+            except Exception as e:
+                self.logger.warning(f"关闭旧 HTTP 会话时出现异常: {e}")
+
+        # 创建新的调度器和 HTTP 会话并保存到类变量中
         RssPlugin._shared_scheduler = AsyncIOScheduler()
         self.scheduler = RssPlugin._shared_scheduler
         self.scheduler.start()
+
+        RssPlugin._shared_http_session = self.http_session
         # ---------------------------------------
 
         self._fresh_asyncIOScheduler()
@@ -89,25 +111,13 @@ class RssPlugin(Star):
         }
 
     async def parse_channel_info(self, url):
-        headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        connector = aiohttp.TCPConnector(ssl=False)
-        timeout = aiohttp.ClientTimeout(total=30, connect=10)
         try:
-            # 【修改点 1】：将 trust_env 改为 False，确保拉取 RSS 时不走系统级代理
-            async with aiohttp.ClientSession(trust_env=False,
-                                        connector=connector,
-                                        timeout=timeout,
-                                        headers=headers
-                                        ) as session:
-                # 【修改点 2】：移除 proxy=self.proxy，确保拉取 RSS 纯直连
-                async with session.get(url) as resp: 
-                    if resp.status != 200:
-                        self.logger.error(f"rss: 无法正常打开站点 {url}")
-                        return None
-                    text = await resp.read()
-                    return text
+            async with self.http_session.get(url) as resp:
+                if resp.status != 200:
+                    self.logger.error(f"rss: 无法正常打开站点 {url}")
+                    return None
+                text = await resp.read()
+                return text
         except asyncio.TimeoutError:
             self.logger.error(f"rss: 请求站点 {url} 超时")
             return None
@@ -204,13 +214,15 @@ class RssPlugin(Star):
         cnt = 0
         rss_items = []
 
+        # 提前获取频道标题，避免在循环中重复查询
+        chan_title = (
+            self.data_handler.data[url]["info"]["title"]
+            if url in self.data_handler.data
+            else "未知频道"
+        )
+
         for item in items:
             try:
-                chan_title = (
-                    self.data_handler.data[url]["info"]["title"]
-                    if url in self.data_handler.data
-                    else "未知频道"
-                )
 
                 raw_title = item.xpath("title")
                 title = raw_title[0].text if (raw_title and raw_title[0].text) else "无标题"
@@ -226,8 +238,7 @@ class RssPlugin(Star):
                 raw_desc = item.xpath("description")
                 description = raw_desc[0].text if (raw_desc and raw_desc[0].text) else ""
 
-                pic_url_list = self.data_handler.strip_html_pic(description)
-                description = self.data_handler.strip_html(description)
+                description, pic_url_list = self.data_handler.parse_html_text_and_pics(description)
 
                 if len(description) > self.description_max_length:
                     description = (
@@ -236,14 +247,14 @@ class RssPlugin(Star):
 
                 pub_date_nodes = item.xpath("pubDate")
                 if pub_date_nodes:
-                    pub_date = item.xpath("pubDate")[0].text
+                    pub_date = pub_date_nodes[0].text
                     try:
-                        pub_date_parsed = time.strptime(
+                        dt = datetime.strptime(
                             pub_date.replace("GMT", "+0000"),
                             "%a, %d %b %Y %H:%M:%S %z",
                         )
-                        pub_date_timestamp = int(time.mktime(pub_date_parsed))
-                    except:
+                        pub_date_timestamp = int(dt.timestamp())
+                    except Exception:
                         pub_date_timestamp = 0
 
                     if pub_date_timestamp > after_timestamp:
@@ -285,8 +296,28 @@ class RssPlugin(Star):
             url = "https://" + url
         return url
 
+    def _add_single_job(self, url: str, user: str, cron_expr: str):
+        """增量添加单个定时任务"""
+        job_id = f"{url}_{user}"
+        self.scheduler.add_job(
+            self.cron_task_callback,
+            "cron",
+            **self.parse_cron_expr(cron_expr),
+            args=[url, user],
+            id=job_id,
+            replace_existing=True,
+        )
+
+    def _remove_single_job(self, url: str, user: str):
+        """增量移除单个定时任务"""
+        job_id = f"{url}_{user}"
+        try:
+            self.scheduler.remove_job(job_id)
+        except Exception:
+            pass
+
     def _fresh_asyncIOScheduler(self):
-        """刷新定时任务"""
+        """刷新定时任务（全量重建，仅在初始化时使用）"""
         self.logger.info("刷新定时任务")
         self.scheduler.remove_all_jobs()
 
@@ -294,15 +325,7 @@ class RssPlugin(Star):
             if url in ["rsshub_endpoints", "settings"]:
                 continue
             for user, sub_info in info["subscribers"].items():
-                job_id = f"{url}_{user}" 
-                self.scheduler.add_job(
-                    self.cron_task_callback,
-                    "cron",
-                    **self.parse_cron_expr(sub_info["cron_expr"]),
-                    args=[url, user],
-                    id=job_id,
-                    replace_existing=True 
-                )
+                self._add_single_job(url, user, sub_info["cron_expr"])
 
     async def _add_url(self, url: str, cron_expr: str, message: AstrMessageEvent):
         """内部方法：添加URL订阅的共用逻辑"""
@@ -346,97 +369,92 @@ class RssPlugin(Star):
         self.data_handler.save_data()
         return self.data_handler.data[url]["info"]
 
-    async def _get_chain_components(self, item: RSSItem):
-        """组装消息链（已修复时间与排版）"""
-        from datetime import datetime, timezone, timedelta
-        import email.utils
-        
-        comps = []
-        text_parts = [] # 使用列表收集所有文本，最后一次性拼接，解决换行丢失问题
-        
-        # 1. 醒目的头部：频道名称
-        source_name = item.chan_title.replace("Twitter @", "🐦 ").strip()
-        text_parts.append(f"📰 【{item.chan_title}】")
-        text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")# 替换为较轻量的分割线
-        
-        # 4. 【核心修复】友好的发布时间 (强制使用东八区 UTC+8)
-        # 设定一个固定的东八区时区，绕开服务器系统的本地时区设置
+    def _format_time(self, item: RSSItem) -> str:
+        “””格式化发布时间为东八区友好的字符串”””
         tz_utc_8 = timezone(timedelta(hours=8))
-        formatted_time = ""
-        
-        # 优先读取原始字符串，无视被上游解析错误的时间戳
-        if getattr(item, 'pub_date', None):
+        formatted_time = “”
+
+        if item.pub_date:
             pub_date_str = str(item.pub_date).strip()
-            
             try:
-                # 尝试 A: 如果它是完整的 RSSHub 格式 (如 Sat, 28 Feb 2026 06:37:12 GMT)
                 dt = email.utils.parsedate_to_datetime(pub_date_str)
-                formatted_time = dt.astimezone(tz_utc_8).strftime("%Y-%m-%d %H:%M:%S")
+                formatted_time = dt.astimezone(tz_utc_8).strftime(“%Y-%m-%d %H:%M:%S”)
             except Exception:
                 pass
-                
             if not formatted_time:
                 try:
-                    # 尝试 B: 上游瞎眼把它截断成了纯粹的 "2026-02-28 06:37:12"
-                    # 根据你的反馈，RSSHub源是GMT，所以我们将错就错，强行给这个字符串贴上 UTC 标签并 +8 小时
-                    dt = datetime.strptime(pub_date_str, "%Y-%m-%d %H:%M:%S")
+                    dt = datetime.strptime(pub_date_str, “%Y-%m-%d %H:%M:%S”)
                     dt = dt.replace(tzinfo=timezone.utc).astimezone(tz_utc_8)
-                    formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    formatted_time = dt.strftime(“%Y-%m-%d %H:%M:%S”)
                 except Exception:
                     pass
-                    
-        # 尝试 C: 如果全失败了，才使用带有污染的 timestamp 进行暴力修正兜底
-        if not formatted_time and getattr(item, 'pubDate_timestamp', 0) > 0:
+
+        if not formatted_time and item.pubDate_timestamp > 0:
             try:
-                # 获取它错误的本地字面时间，将其强行视为 UTC 时间，然后转为东八区
                 dt_naive = datetime.fromtimestamp(item.pubDate_timestamp)
                 dt_corrected = dt_naive.replace(tzinfo=timezone.utc).astimezone(tz_utc_8)
-                formatted_time = dt_corrected.strftime("%Y-%m-%d %H:%M:%S")
+                formatted_time = dt_corrected.strftime(“%Y-%m-%d %H:%M:%S”)
             except Exception:
                 pass
 
-        # 兜底输出时间
+        return formatted_time
+
+    def _build_text_body(self, item: RSSItem) -> str:
+        “””构建消息文本主体”””
+        text_parts = []
+
+        text_parts.append(f”📰 【{item.chan_title}】”)
+        text_parts.append(“━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━”)
+
+        formatted_time = self._format_time(item)
         if formatted_time:
-            text_parts.append(f"🕒 {formatted_time}")
-        elif getattr(item, 'pub_date', None):
-            text_parts.append(f"🕒 {item.pub_date}")
+            text_parts.append(f”🕒 {formatted_time}”)
+        elif item.pub_date:
+            text_parts.append(f”🕒 {item.pub_date}”)
 
-        # 5. 来源链接 (放置底部防止排版被破坏)
-        if not getattr(self, 'is_hide_url', False) and getattr(item, 'link', None):
-            text_parts.append(f"🔗 {item.link}")
+        if not self.is_hide_url and item.link:
+            text_parts.append(f”🔗 {item.link}”)
 
-        text_parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        
-        title = item.title.strip() if item.title else ""
-        desc = item.description.strip() if item.description else ""
+        text_parts.append(“━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━”)
 
-        # 3. 标题与正文逻辑处理
-        # 如果标题存在且不是“无标题”
-        if title and title != "无标题" and not desc.startswith(title[:10]):
-            text_parts.append(f"📌 {title}")
+        title = item.title.strip() if item.title else “”
+        desc = item.description.strip() if item.description else “”
+
+        if title and title != “无标题” and not desc.startswith(title[:10]):
+            text_parts.append(f”📌 {title}”)
         if desc:
-            # 给话题标签前后增加空格，或者单独换行（可选）
-            desc = desc.replace("#", "\n#") 
-            text_parts.append(f"💬 {desc}")
+            desc = desc.replace(“#”, “\n#”)
+            text_parts.append(f”💬 {desc}”)
 
-        # === 合并所有文本组件 ===
-        # 将上面收集的所有文本用换行符(\n)连接成一个完整的字符串
-        # 彻底避免多个 Comp.Plain 拼接时导致的排版挤压和换行失效问题
-        full_text = "\n".join(text_parts)
-        comps.append(Comp.Plain(full_text))
+        return “\n”.join(text_parts)
 
-        # 7. 图片处理 (保留原逻辑)
+    async def _fetch_images(self, item: RSSItem) -> list:
+        “””并行下载 RSS 条目的图片，返回 Image 组件列表”””
+        comps = []
         if self.is_read_pic and item.pic_urls:
             temp_max_pic_item = len(item.pic_urls) if self.max_pic_item == -1 else self.max_pic_item
-            for pic_url in item.pic_urls[:temp_max_pic_item]:
-                base64str = await self.pic_handler.modify_corner_pixel_to_base64(pic_url)
-                if base64str is None:
-                    comps.append(Comp.Plain("\n[图片加载失败]"))
-                    continue
+            pic_urls = item.pic_urls[:temp_max_pic_item]
+            results = await asyncio.gather(
+                *(self.pic_handler.modify_corner_pixel_to_base64(url) for url in pic_urls),
+                return_exceptions=True,
+            )
+            for base64str in results:
+                if base64str is None or isinstance(base64str, Exception):
+                    comps.append(Comp.Plain(“\n[图片加载失败]”))
                 else:
-                    comps.append(Comp.Plain("\n")) # 换行防粘连
+                    comps.append(Comp.Plain(“\n”))
                     comps.append(Comp.Image.fromBase64(base64str))
-                    
+        return comps
+
+    async def _get_chain_components(self, item: RSSItem):
+        “””组装消息链”””
+        comps = []
+        text = self._build_text_body(item)
+        comps.append(Comp.Plain(text))
+
+        image_comps = await self._fetch_images(item)
+        comps.extend(image_comps)
+
         return comps
     
     def _is_url_or_ip(self,text: str) -> bool:
@@ -528,7 +546,7 @@ class RssPlugin(Star):
             chan_title = ret["title"]
             chan_desc = ret["description"]
 
-        self._fresh_asyncIOScheduler()
+        self._add_single_job(url, event.unified_msg_origin, cron_expr)
 
         yield event.plain_result(
             f"添加成功。频道信息：\n标题: {chan_title}\n描述: {chan_desc}"
@@ -555,12 +573,12 @@ class RssPlugin(Star):
             chan_title = ret["title"]
             chan_desc = ret["description"]
 
-        self._fresh_asyncIOScheduler()
+        self._add_single_job(url, event.unified_msg_origin, cron_expr)
 
         yield event.plain_result(
             f"添加成功。频道信息：\n标题: {chan_title}\n描述: {chan_desc}"
         )
-        
+
 
     @rss.command("list")
     async def list_command(self, event: AstrMessageEvent):
@@ -583,14 +601,17 @@ class RssPlugin(Star):
             yield event.plain_result("索引越界, 请使用 /rss list 查看已经添加的订阅")
             return
         url = subs_urls[idx]
-        self.data_handler.data[url]["subscribers"].pop(event.unified_msg_origin)
+        subscriber = self.data_handler.data[url]["subscribers"].pop(event.unified_msg_origin, None)
+        if subscriber is None:
+            yield event.plain_result("你未订阅该频道。")
+            return
 
         if not self.data_handler.data[url]["subscribers"]:
             self.data_handler.data.pop(url)
 
+        self._remove_single_job(url, event.unified_msg_origin)
         self.data_handler.save_data()
 
-        self._fresh_asyncIOScheduler()
         yield event.plain_result("删除成功")
 
     @rss.command("update")
@@ -604,7 +625,8 @@ class RssPlugin(Star):
         new_cron = f"{minute} {hour} {day} {month} {day_of_week}"
         self.data_handler.data[url]["subscribers"][user]["cron_expr"] = new_cron
         self.data_handler.save_data()
-        self._fresh_asyncIOScheduler()
+        self._remove_single_job(url, user)
+        self._add_single_job(url, user, new_cron)
         yield event.plain_result(f"✅ 更新成功！\n频道: {self.data_handler.data[url]['info']['title']}\n新周期: `{new_cron}`")
 
 
