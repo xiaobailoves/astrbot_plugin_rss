@@ -100,7 +100,7 @@ class RssPlugin(Star):
         # ---------------------------------------
 
         # WebUI 配置
-        self.webui_host = config.get("webui_host", "127.0.0.1")
+        self.webui_host = config.get("webui_host", "0.0.0.0")
         self.webui_port = config.get("webui_port", 8888)
 
         self._fresh_asyncIOScheduler()

@@ -24,6 +24,7 @@ class RssWebUI:
         self.app.router.add_post("/api/rsshub", self._add_endpoint)
         self.app.router.add_delete("/api/rsshub/{idx}", self._del_endpoint)
         self.app.router.add_get("/api/subscriptions", self._list_subscriptions)
+        self.app.router.add_get("/api/subscriptions/all", self._list_all_subs)
         self.app.router.add_post("/api/subscriptions/rsshub", self._add_sub_rsshub)
         self.app.router.add_post("/api/subscriptions/url", self._add_sub_url)
         self.app.router.add_delete("/api/subscriptions/{idx}", self._del_subscription)
@@ -117,6 +118,23 @@ class RssWebUI:
                     }
                 )
         return result
+
+    async def _list_all_subs(self, request):
+        dh = self.plugin.data_handler
+        result = []
+        for url, info in dh.data.items():
+            if url in ("rsshub_endpoints", "settings"):
+                continue
+            for user, sub in info.get("subscribers", {}).items():
+                result.append({
+                    "user": user,
+                    "url": url,
+                    "title": info.get("info", {}).get("title", "unknown"),
+                    "desc": info.get("info", {}).get("description", ""),
+                    "cron": sub.get("cron_expr", ""),
+                    "last_update": sub.get("last_update", 0),
+                })
+        return self._json(result)
 
     async def _list_subscriptions(self, request):
         user = request.query.get("user", "")

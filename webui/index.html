@@ -133,7 +133,7 @@ tbody tr:hover { background:#f8fafc; }
       </div>
       <div id="sub-hint" class="empty">
         <div class="icon">📡</div>
-        <p>输入用户标识后点击「查询」</p>
+        <p>加载中...</p>
       </div>
       <table id="sub-table" style="display:none">
         <thead><tr><th>#</th><th>频道</th><th>Cron</th><th>URL</th><th style="width:180px">操作</th></tr></thead>
@@ -249,6 +249,7 @@ document.querySelectorAll('aside nav a').forEach(a => {
     a.classList.add('active');
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.getElementById('panel-' + a.dataset.tab).classList.add('active');
+    if (a.dataset.tab === 'subscriptions') loadSubs();
     if (a.dataset.tab === 'config') loadConfig();
   });
 });
@@ -287,15 +288,20 @@ async function delEndpoint(idx) {
 // ── Subscriptions ──
 let _subsUser = '', _subsData = [];
 async function loadSubs() {
-  _subsUser = document.getElementById('sub-user').value.trim();
-  if (!_subsUser) return;
-  const r = await fetch('/api/subscriptions?user=' + encodeURIComponent(_subsUser));
+  const userFilter = document.getElementById('sub-user').value.trim();
+  const all = !userFilter;
+  const url = all ? '/api/subscriptions/all' : '/api/subscriptions?user=' + encodeURIComponent(userFilter);
+  const r = await fetch(url);
   _subsData = await r.json();
+  _subsUser = userFilter;
   if (_subsData.error) { toast(_subsData.error, 'err'); return; }
   const table = document.getElementById('sub-table'), hint = document.getElementById('sub-hint');
-  if (!_subsData.length) { table.style.display = 'none'; hint.style.display = ''; hint.innerHTML = '<div class="icon">📡</div><p>该用户暂无订阅</p>'; return; }
+  if (!_subsData.length) { table.style.display = 'none'; hint.style.display = ''; hint.innerHTML = '<div class="icon">📡</div><p>' + (all ? '没有任何订阅' : '该用户暂无订阅') + '</p>'; return; }
   table.style.display = ''; hint.style.display = 'none';
+  const showUser = all;
+  document.querySelector('#sub-table thead tr').innerHTML = (showUser ? '<th>用户</th>' : '') + '<th>#</th><th>频道</th><th>Cron</th><th>URL</th><th style="width:180px">操作</th>';
   document.querySelector('#sub-table tbody').innerHTML = _subsData.map((s, i) => `<tr>
+    ${showUser ? '<td><code style="font-size:11px">' + s.user + '</code></td>' : ''}
     <td><span class="badge badge-gray">#${i}</span></td>
     <td><strong style="font-size:13px">${s.title}</strong></td>
     <td><code style="font-size:12px">${s.cron}</code></td>
@@ -308,15 +314,18 @@ async function loadSubs() {
   </tr>`).join('');
 }
 async function delSub(idx) {
-  if (!confirm('确认删除「' + _subsData[idx].title + '」？')) return;
-  await fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(_subsUser), {method:'DELETE'});
+  const s = _subsData[idx];
+  const user = _subsUser || s.user;
+  if (!confirm('确认删除「' + s.title + '」？')) return;
+  await fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(user), {method:'DELETE'});
   loadSubs(); toast('已删除', 'ok');
 }
 function showEditModal(idx) {
   const s = _subsData[idx];
   const cron = prompt('修改 Cron 表达式:', s.cron);
   if (!cron) return;
-  fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(_subsUser), {
+  const user = _subsUser || s.user;
+  fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(user), {
     method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({cron})
   }).then(r => r.json()).then(d => {
     if (d.ok) { loadSubs(); toast('Cron 已更新', 'ok'); }
@@ -361,7 +370,9 @@ async function doAddSub() {
 async function fetchSub(idx) {
   document.getElementById('fetch-modal').classList.add('show');
   document.getElementById('fetch-result').innerHTML = '<p style="color:var(--text2);padding:20px;text-align:center">加载中...</p>';
-  const r = await fetch('/api/subscriptions/' + idx + '/fetch?user=' + encodeURIComponent(_subsUser), {method:'POST'});
+  const s = _subsData[idx];
+  const user = _subsUser || s.user;
+  const r = await fetch('/api/subscriptions/' + idx + '/fetch?user=' + encodeURIComponent(user), {method:'POST'});
   const d = await r.json();
   const el = document.getElementById('fetch-result');
   if (d.error) { el.innerHTML = `<p style="color:var(--red);padding:20px">${d.error}</p>`; return; }
