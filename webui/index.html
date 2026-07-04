@@ -273,7 +273,63 @@ tbody tr:hover { background:#f8fafc; }
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+<!-- 登录验证 -->
+<div class="modal-overlay" id="login-overlay">
+  <div class="modal">
+    <h3>访问验证</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:16px">此管理后台需要令牌才能访问</p>
+    <div class="form-group"><input type="password" id="login-token" placeholder="请输入访问令牌" autofocus onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="doLogin()">验证</button>
+    </div>
+    <p id="login-err" style="font-size:12px;color:var(--red);margin-top:8px;display:none"></p>
+  </div>
+</div>
+
 <script>
+// ── Auth ──
+let _token = localStorage.getItem('rss_token') || '';
+function apiFetch(url, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || {};
+  if (_token) {
+    url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(_token);
+  }
+  return fetch(url, opts).then(r => {
+    if (r.status === 401) { showLogin(); throw new Error('unauthorized'); }
+    return r;
+  });
+}
+function showLogin() {
+  _token = ''; localStorage.removeItem('rss_token');
+  document.getElementById('login-overlay').classList.add('show');
+  document.getElementById('login-err').style.display = 'none';
+}
+async function doLogin() {
+  const token = document.getElementById('login-token').value.trim();
+  if (!token) return;
+  const r = await fetch('/api/auth', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token})});
+  const d = await r.json();
+  if (d.ok) {
+    _token = token; localStorage.setItem('rss_token', token);
+    document.getElementById('login-overlay').classList.remove('show');
+    loadEndpoints(); loadSubs();
+  } else {
+    document.getElementById('login-err').textContent = '令牌无效';
+    document.getElementById('login-err').style.display = '';
+  }
+}
+// Check if auth is needed on startup
+(async function init() {
+  const r = await fetch('/api/auth', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token:'__ping__'})});
+  if (r.status === 401) { showLogin(); return; }
+  const d = await r.json();
+  if (d.need_auth === false) { loadEndpoints(); loadSubs(); return; }
+  // Token is set but saved token might still work
+  if (_token) { loadEndpoints(); loadSubs(); }
+  else showLogin();
+})();
+
 // ── Navigation ──
 document.querySelectorAll('aside nav a').forEach(a => {
   a.addEventListener('click', e => {
@@ -296,7 +352,7 @@ function toast(msg, type) {
 
 // ── Endpoints ──
 async function loadEndpoints() {
-  const r = await fetch('/api/rsshub'); const data = await r.json();
+  const r = await apiFetch('/api/rsshub'); const data = await r.json();
   const tbody = document.querySelector('#ep-table tbody');
   if (!data.length) {
     tbody.innerHTML = '<tr><td colspan="3"><div class="empty"><div class="icon">🔗</div><p>暂无端点，在上方输入 RSSHub 地址添加</p></div></td></tr>';
@@ -307,14 +363,14 @@ async function loadEndpoints() {
 async function addEndpoint() {
   const url = document.getElementById('ep-url').value.trim();
   if (!url) return toast('请输入 URL', 'err');
-  const r = await fetch('/api/rsshub', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url})});
+  const r = await apiFetch('/api/rsshub', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url})});
   const d = await r.json();
   if (d.ok) { document.getElementById('ep-url').value = ''; loadEndpoints(); toast('端点已添加', 'ok'); }
   else toast(d.error, 'err');
 }
 async function delEndpoint(idx) {
   if (!confirm('确认删除端点 #' + idx + '？已通过此端点订阅的内容不受影响。')) return;
-  await fetch('/api/rsshub/' + idx, {method:'DELETE'});
+  await apiFetch('/api/rsshub/' + idx, {method:'DELETE'});
   loadEndpoints(); toast('已删除', 'ok');
 }
 
@@ -324,7 +380,7 @@ async function loadSubs() {
   const userFilter = document.getElementById('sub-user').value.trim();
   const all = !userFilter;
   const url = all ? '/api/subscriptions/all' : '/api/subscriptions?user=' + encodeURIComponent(userFilter);
-  const r = await fetch(url);
+  const r = await apiFetch(url);
   _subsData = await r.json();
   _subsUser = userFilter;
   if (_subsData.error) { toast(_subsData.error, 'err'); return; }
@@ -350,7 +406,7 @@ async function delSub(idx) {
   const s = _subsData[idx];
   const user = _subsUser || s.user;
   if (!confirm('确认删除「' + s.title + '」？')) return;
-  await fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(user), {method:'DELETE'});
+  await apiFetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(user), {method:'DELETE'});
   loadSubs(); toast('已删除', 'ok');
 }
 let _editIdx = -1;
@@ -375,7 +431,7 @@ async function doEditSub() {
   const s = _subsData[_editIdx];
   if (!s) return;
   const idx = _editIdx;
-  const r = await fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(user), {
+  const r = await apiFetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(user), {
     method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({cron})
   });
   const d = await r.json();
@@ -412,7 +468,7 @@ async function doAddSub() {
     if (!url) return toast('请输入 RSS URL', 'err');
     body = {user, url, cron}; path = '/api/subscriptions/url';
   }
-  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const r = await apiFetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const d = await r.json();
   if (d.ok) { closeModal(); loadSubs(); toast('订阅添加成功', 'ok'); }
   else toast(d.error, 'err');
@@ -422,7 +478,7 @@ async function fetchSub(idx) {
   document.getElementById('fetch-result').innerHTML = '<p style="color:var(--text2);padding:20px;text-align:center">加载中...</p>';
   const s = _subsData[idx];
   const user = _subsUser || s.user;
-  const r = await fetch('/api/subscriptions/' + idx + '/fetch?user=' + encodeURIComponent(user), {method:'POST'});
+  const r = await apiFetch('/api/subscriptions/' + idx + '/fetch?user=' + encodeURIComponent(user), {method:'POST'});
   const d = await r.json();
   const el = document.getElementById('fetch-result');
   if (d.error) { el.innerHTML = `<p style="color:var(--red);padding:20px">${d.error}</p>`; return; }
@@ -436,7 +492,7 @@ async function fetchSub(idx) {
     </div>`).join('');
 }
 async function reloadScheduler() {
-  const r = await fetch('/api/reload', {method:'POST'});
+  const r = await apiFetch('/api/reload', {method:'POST'});
   const d = await r.json();
   if (d.ok) toast('调度器已重载，共 ' + d.jobs + ' 个任务', 'ok');
   else toast(d.error, 'err');
@@ -447,7 +503,7 @@ function closeModal() {
 
 // ── Config ──
 async function loadConfig() {
-  const r = await fetch('/api/config'); const cfg = await r.json();
+  const r = await apiFetch('/api/config'); const cfg = await r.json();
   document.getElementById('cfg-title_max_length').value = cfg.title_max_length ?? 30;
   document.getElementById('cfg-description_max_length').value = cfg.description_max_length ?? 500;
   document.getElementById('cfg-max_items_per_poll').value = cfg.max_items_per_poll ?? 3;
@@ -482,7 +538,7 @@ async function saveConfig() {
       twitter_reverse_proxy_domain: document.getElementById('cfg-twitter_reverse_proxy_domain').value,
     },
   };
-  const r = await fetch('/api/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const r = await apiFetch('/api/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const d = await r.json();
   const s = document.getElementById('cfg-status');
   if (d.ok) { s.textContent = '✓  已保存。部分配置需重启插件后生效。'; s.style.color = 'var(--green)'; toast('配置已保存', 'ok'); }

@@ -102,11 +102,14 @@ class RssPlugin(Star):
         # WebUI 配置
         self.webui_host = config.get("webui_host", "0.0.0.0")
         self.webui_port = config.get("webui_port", 8888)
+        self.webui_token = config.get("webui_token", "")
 
         self._fresh_asyncIOScheduler()
 
         # 启动 WebUI
-        self.webui = RssWebUI(self, host=self.webui_host, port=self.webui_port)
+        self.webui = RssWebUI(
+            self, host=self.webui_host, port=self.webui_port, token=self.webui_token
+        )
         asyncio.ensure_future(self.webui.start())
 
     def parse_cron_expr(self, cron_expr: str):

@@ -11,15 +11,34 @@ STATIC_DIR = __import__("os").path.join(
 class RssWebUI:
     """RSS 插件 Web 管理后台"""
 
-    def __init__(self, plugin, host="127.0.0.1", port=8888):
+    def __init__(self, plugin, host="127.0.0.1", port=8888, token=""):
         self.plugin = plugin
         self.host = host
         self.port = port
-        self.app = web.Application()
+        self.token = token
+        self.app = web.Application(middlewares=[self._auth_middleware])
         self._setup_routes()
+
+    @web.middleware
+    async def _auth_middleware(self, request, handler):
+        # 未设置 token 或访问静态页面 / auth 接口时跳过验证
+        if not self.token:
+            return await handler(request)
+        if request.path == "/" and request.method == "GET":
+            return await handler(request)
+        if request.path == "/api/auth" and request.method == "POST":
+            return await handler(request)
+        # 从 query 或 header 中读取 token
+        req_token = request.query.get("token", "") or request.headers.get(
+            "Authorization", ""
+        ).replace("Bearer ", "")
+        if req_token != self.token:
+            return self._json({"error": "token 无效"}, 401)
+        return await handler(request)
 
     def _setup_routes(self):
         self.app.router.add_get("/", self._serve_index)
+        self.app.router.add_post("/api/auth", self._verify_token)
         self.app.router.add_get("/api/rsshub", self._list_endpoints)
         self.app.router.add_post("/api/rsshub", self._add_endpoint)
         self.app.router.add_delete("/api/rsshub/{idx}", self._del_endpoint)
@@ -46,6 +65,14 @@ class RssWebUI:
         )
 
     # ── 静态页面 ──────────────────────────────────────────
+
+    async def _verify_token(self, request):
+        if not self.token:
+            return self._json({"ok": True, "need_auth": False})
+        body = await self._body(request)
+        if body.get("token") == self.token:
+            return self._json({"ok": True, "need_auth": True})
+        return self._json({"error": "token 无效"}, 401)
 
     async def _serve_index(self, request):
         path = STATIC_DIR + "/index.html"

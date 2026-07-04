@@ -75,6 +75,13 @@
         "minimum": 1024,
         "maximum": 65535
     },
+    "webui_token": {
+        "description": "WebUI 访问令牌",
+        "type": "string",
+        "hint": "设置后访问 WebUI 需要输入此令牌。留空则不验证。",
+        "obvious_hint": true,
+        "default": ""
+    },
     "pic_config": {
         "description": "图片相关配置",
         "type": "object",
