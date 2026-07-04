@@ -64,14 +64,14 @@
         "type": "string",
         "hint": "Web 管理后台的监听地址。默认 127.0.0.1 (仅本机访问)。如需局域网访问可设为 0.0.0.0。",
         "obvious_hint": true,
-        "default": "127.0.0.1"
+        "default": "0.0.0.0"
     },
     "webui_port": {
         "description": "WebUI 监听端口",
         "type": "int",
         "hint": "Web 管理后台的监听端口。",
         "obvious_hint": true,
-        "default": 8888,
+        "default": 9999,
         "minimum": 1024,
         "maximum": 65535
     },
