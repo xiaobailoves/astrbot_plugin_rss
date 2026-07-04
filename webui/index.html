@@ -196,6 +196,7 @@ tbody tr:hover { background:#f8fafc; }
       </div>
     </div>
     <button class="btn btn-primary" onclick="saveConfig()" style="padding:10px 24px">保存配置</button>
+    <button class="btn btn-ghost" onclick="reloadScheduler()" style="padding:10px 24px;margin-left:8px">重载调度器</button>
     <span id="cfg-status" style="margin-left:12px;font-size:13px"></span>
   </div>
 
@@ -433,6 +434,12 @@ async function fetchSub(idx) {
       ${(i.pic_urls || []).map(u => '<img src="' + u + '" style="max-width:100%;max-height:300px;border-radius:6px;margin-top:8px;display:block" loading="lazy" onerror="this.style.display=\'none\'">').join('')}
       <a href="${i.link}" target="_blank" style="display:inline-block;margin-top:8px">查看原文 →</a>
     </div>`).join('');
+}
+async function reloadScheduler() {
+  const r = await fetch('/api/reload', {method:'POST'});
+  const d = await r.json();
+  if (d.ok) toast('调度器已重载，共 ' + d.jobs + ' 个任务', 'ok');
+  else toast(d.error, 'err');
 }
 function closeModal() {
   document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('show'));

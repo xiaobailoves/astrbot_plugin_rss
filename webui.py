@@ -34,6 +34,7 @@ class RssWebUI:
         )
         self.app.router.add_get("/api/config", self._get_config)
         self.app.router.add_put("/api/config", self._update_config)
+        self.app.router.add_post("/api/reload", self._reload_scheduler)
 
     async def start(self):
         runner = web.AppRunner(self.app)
@@ -248,6 +249,11 @@ class RssWebUI:
     async def _get_config(self, request):
         cfg = self.plugin.config
         return self._json(dict(cfg) if hasattr(cfg, "items") else {})
+
+    async def _reload_scheduler(self, request):
+        self.plugin._fresh_asyncIOScheduler()
+        count = len(self.plugin.scheduler.get_jobs())
+        return self._json({"ok": True, "jobs": count})
 
     async def _update_config(self, request):
         body = await self._body(request)
