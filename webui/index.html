@@ -237,6 +237,37 @@ tbody tr:hover { background:#f8fafc; }
   </div>
 </div>
 
+<!-- 编辑订阅弹窗 -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal">
+    <h3>编辑订阅 — <span id="edit-title"></span></h3>
+    <div class="form-group"><label class="form-label">URL</label><input type="text" id="edit-url" readonly style="color:var(--text2)"></div>
+    <div class="form-group"><label class="form-label">Cron 表达式</label>
+      <select id="edit-cron-preset" onchange="onCronPresetChange()" style="margin-bottom:8px">
+        <option value="">-- 快速选择 --</option>
+        <option value="*/5 * * * *">每 5 分钟</option>
+        <option value="*/10 * * * *">每 10 分钟</option>
+        <option value="*/30 * * * *">每 30 分钟</option>
+        <option value="0 * * * *">每小时整点</option>
+        <option value="0 */2 * * *">每 2 小时</option>
+        <option value="0 */6 * * *">每 6 小时</option>
+        <option value="0 */12 * * *">每 12 小时</option>
+        <option value="0 0 * * *">每天 0 点</option>
+        <option value="0 8 * * *">每天早上 8 点</option>
+        <option value="0 20 * * *">每天晚上 8 点</option>
+        <option value="0 9 * * 1-5">工作日早上 9 点</option>
+        <option value="0 0 1 * *">每月 1 号</option>
+      </select>
+      <input type="text" id="edit-cron" placeholder="或手动输入 Cron 表达式">
+    </div>
+    <div class="form-group"><label class="form-label">用户</label><input type="text" id="edit-user" readonly style="color:var(--text2)"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="doEditSub()">保存修改</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
@@ -320,17 +351,34 @@ async function delSub(idx) {
   await fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(user), {method:'DELETE'});
   loadSubs(); toast('已删除', 'ok');
 }
+let _editIdx = -1;
 function showEditModal(idx) {
+  _editIdx = idx;
   const s = _subsData[idx];
-  const cron = prompt('修改 Cron 表达式:', s.cron);
-  if (!cron) return;
-  const user = _subsUser || s.user;
-  fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(user), {
+  document.getElementById('edit-title').textContent = s.title;
+  document.getElementById('edit-url').value = s.url;
+  document.getElementById('edit-user').value = _subsUser || s.user || '';
+  document.getElementById('edit-cron').value = s.cron;
+  document.getElementById('edit-cron-preset').value = '';
+  document.getElementById('edit-modal').classList.add('show');
+}
+function onCronPresetChange() {
+  const v = document.getElementById('edit-cron-preset').value;
+  if (v) document.getElementById('edit-cron').value = v;
+}
+async function doEditSub() {
+  const cron = document.getElementById('edit-cron').value.trim();
+  if (!cron) return toast('请输入 Cron 表达式', 'err');
+  const user = document.getElementById('edit-user').value.trim();
+  const s = _subsData[_editIdx];
+  if (!s) return;
+  const idx = _editIdx;
+  const r = await fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(user), {
     method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({cron})
-  }).then(r => r.json()).then(d => {
-    if (d.ok) { loadSubs(); toast('Cron 已更新', 'ok'); }
-    else toast(d.error, 'err');
   });
+  const d = await r.json();
+  if (d.ok) { closeModal(); loadSubs(); toast('Cron 已更新', 'ok'); }
+  else toast(d.error, 'err');
 }
 
 // ── Add modal ──
