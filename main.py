@@ -16,6 +16,7 @@ import astrbot.api.message_components as Comp
 from .data_handler import DataHandler
 from .pic_handler import RssImageHandler
 from .rss import RSSItem
+from .webui import RssWebUI
 from typing import List
 
 
@@ -98,7 +99,15 @@ class RssPlugin(Star):
         RssPlugin._shared_http_session = self.http_session
         # ---------------------------------------
 
+        # WebUI 配置
+        self.webui_host = config.get("webui_host", "127.0.0.1")
+        self.webui_port = config.get("webui_port", 8888)
+
         self._fresh_asyncIOScheduler()
+
+        # 启动 WebUI
+        self.webui = RssWebUI(self, host=self.webui_host, port=self.webui_port)
+        asyncio.ensure_future(self.webui.start())
 
     def parse_cron_expr(self, cron_expr: str):
         fields = cron_expr.split() 

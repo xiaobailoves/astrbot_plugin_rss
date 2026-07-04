@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RSS 管理</title>
+<style>
+:root {
+  --bg: #f0f2f5; --card: #fff; --sidebar: #1e293b;
+  --text: #1e293b; --text2: #64748b; --text3: #94a3b8;
+  --border: #e2e8f0; --accent: #3b82f6; --accent-h: #2563eb;
+  --green: #10b981; --red: #ef4444; --orange: #f59e0b;
+  --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-lg: 0 10px 25px rgba(0,0,0,.1);
+  --radius: 10px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background:var(--bg); color:var(--text); display:flex; min-height:100vh; }
+/* Sidebar */
+aside { width:220px; background:var(--sidebar); color:#fff; display:flex; flex-direction:column; flex-shrink:0; }
+aside .logo { padding:20px 24px; font-size:16px; font-weight:700; letter-spacing:-.3px; border-bottom:1px solid rgba(255,255,255,.08); display:flex; align-items:center; gap:8px; }
+aside .logo .dot { width:8px; height:8px; border-radius:50%; background:var(--green); }
+aside nav { flex:1; padding:12px 0; }
+aside nav a { display:flex; align-items:center; gap:10px; padding:10px 24px; color:rgba(255,255,255,.55); text-decoration:none; font-size:14px; transition:.15s; border-left:3px solid transparent; }
+aside nav a:hover { color:#fff; background:rgba(255,255,255,.04); }
+aside nav a.active { color:#fff; background:rgba(255,255,255,.06); border-left-color:var(--accent); }
+aside nav a .icon { font-size:16px; width:20px; text-align:center; }
+/* Main */
+main { flex:1; padding:28px 32px; overflow-y:auto; max-height:100vh; }
+main h2 { font-size:22px; font-weight:600; margin-bottom:20px; color:var(--text); }
+/* Cards */
+.card { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px; margin-bottom:20px; }
+.card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.card-header h3 { font-size:15px; font-weight:600; }
+/* toolbar */
+.toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+.toolbar .spacer { flex:1; }
+/* buttons */
+.btn { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:500; transition:.15s; text-decoration:none; }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover { background:var(--accent-h); }
+.btn-success { background:var(--green); color:#fff; }
+.btn-success:hover { opacity:.9; }
+.btn-danger { background:var(--red); color:#fff; }
+.btn-danger:hover { opacity:.9; }
+.btn-ghost { background:transparent; color:var(--text2); border:1px solid var(--border); }
+.btn-ghost:hover { background:#f8fafc; color:var(--text); }
+.btn-xs { padding:4px 10px; font-size:12px; }
+/* inputs */
+input, select, textarea { width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:6px; font-size:13px; font-family:inherit; color:var(--text); background:var(--card); transition:.15s; }
+input:focus, select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(59,130,246,.1); }
+input::placeholder { color:var(--text3); }
+/* form */
+.form-group { margin-bottom:14px; }
+.form-label { display:block; font-size:12px; font-weight:500; color:var(--text2); margin-bottom:4px; }
+.form-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
+/* table */
+table { width:100%; border-collapse:collapse; }
+thead th { text-align:left; padding:10px 12px; font-size:11px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.5px; border-bottom:2px solid var(--border); background:#f8fafc; }
+tbody td { padding:12px; border-bottom:1px solid var(--border); font-size:13px; }
+tbody tr { transition:.1s; }
+tbody tr:hover { background:#f8fafc; }
+/* badges */
+.badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:500; }
+.badge-blue { background:#eff6ff; color:var(--accent); }
+.badge-gray { background:#f1f5f9; color:var(--text2); }
+/* empty */
+.empty { text-align:center; padding:48px 20px; color:var(--text3); }
+.empty .icon { font-size:40px; margin-bottom:8px; }
+.empty p { font-size:14px; }
+/* tab content */
+.tab-panel { display:none; }
+.tab-panel.active { display:block; }
+/* truncate */
+.truncate { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; }
+/* modal */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,.5); backdrop-filter:blur(2px); z-index:1000; align-items:center; justify-content:center; }
+.modal-overlay.show { display:flex; }
+.modal { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow-lg); padding:28px; min-width:440px; max-width:560px; animation:modal-in .2s ease-out; }
+@keyframes modal-in { from { opacity:0; transform:translateY(-12px) scale(.97); } }
+.modal h3 { font-size:16px; margin-bottom:20px; }
+.modal-footer { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+/* fetch */
+#fetch-result { max-height:420px; overflow-y:auto; }
+#fetch-result .item { padding:12px 0; border-bottom:1px solid var(--border); }
+#fetch-result .item:last-child { border:none; }
+#fetch-result .item h4 { font-size:14px; margin-bottom:4px; }
+#fetch-result .item p { font-size:12px; color:var(--text2); line-height:1.5; }
+#fetch-result .item a { color:var(--accent); font-size:12px; }
+/* status toast */
+.toast { position:fixed; top:20px; right:20px; z-index:2000; padding:12px 20px; border-radius:6px; font-size:13px; font-weight:500; color:#fff; opacity:0; transform:translateX(20px); transition:.25s; pointer-events:none; }
+.toast.show { opacity:1; transform:translateX(0); }
+.toast-ok { background:var(--green); }
+.toast-err { background:var(--red); }
+/* cron quick */
+.cron-quick { display:flex; gap:4px; flex-wrap:wrap; }
+.cron-quick button { padding:4px 10px; border:1px solid var(--border); background:var(--card); border-radius:4px; cursor:pointer; font-size:11px; color:var(--text2); transition:.1s; }
+.cron-quick button:hover { border-color:var(--accent); color:var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside>
+  <div class="logo"><span class="dot"></span>RSS 管理</div>
+  <nav>
+    <a href="#" class="active" data-tab="subscriptions">
+      <span class="icon">📋</span> 订阅列表
+    </a>
+    <a href="#" data-tab="endpoints">
+      <span class="icon">🔗</span> RSSHub 端点
+    </a>
+    <a href="#" data-tab="config">
+      <span class="icon">⚙️</span> 插件配置
+    </a>
+  </nav>
+</aside>
+
+<!-- Main -->
+<main>
+
+  <!-- 订阅管理 -->
+  <div class="tab-panel active" id="panel-subscriptions">
+    <h2>订阅管理</h2>
+    <div class="card">
+      <div class="card-header">
+        <h3>订阅列表</h3>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="sub-user" placeholder="用户标识，如 aiocqhttp:private:123456" style="width:280px;font-size:13px">
+          <button class="btn btn-primary" onclick="loadSubs()">查询</button>
+          <button class="btn btn-success" onclick="showAddModal()">+ 添加</button>
+        </div>
+      </div>
+      <div id="sub-hint" class="empty">
+        <div class="icon">📡</div>
+        <p>输入用户标识后点击「查询」</p>
+      </div>
+      <table id="sub-table" style="display:none">
+        <thead><tr><th>#</th><th>频道</th><th>Cron</th><th>URL</th><th style="width:180px">操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 端点管理 -->
+  <div class="tab-panel" id="panel-endpoints">
+    <h2>RSSHub 端点</h2>
+    <div class="card">
+      <div class="card-header">
+        <h3>已添加的端点</h3>
+        <div style="display:flex;gap:8px">
+          <input type="url" id="ep-url" placeholder="https://rsshub.yurucamp.cn" style="width:300px;font-size:13px">
+          <button class="btn btn-primary" onclick="addEndpoint()">添加端点</button>
+        </div>
+      </div>
+      <table id="ep-table">
+        <thead><tr><th>#</th><th>URL</th><th style="width:80px">操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 配置 -->
+  <div class="tab-panel" id="panel-config">
+    <h2>插件配置</h2>
+    <div class="card">
+      <div class="card-header"><h3>基础设置</h3></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">标题最大长度</label><input type="number" id="cfg-title_max_length"></div>
+        <div class="form-group"><label class="form-label">描述最大长度</label><input type="number" id="cfg-description_max_length"></div>
+        <div class="form-group"><label class="form-label">每次最大条目数 (-1不限)</label><input type="number" id="cfg-max_items_per_poll"></div>
+      </div>
+      <div class="form-row" style="grid-template-columns:repeat(4,1fr)">
+        <div class="form-group"><label class="form-label">合并消息 (QQ转发)</label><select id="cfg-compose"><option value="true">开启</option><option value="false">关闭</option></select></div>
+        <div class="form-group"><label class="form-label">文字转图片</label><select id="cfg-t2i"><option value="true">开启</option><option value="false">关闭</option></select></div>
+        <div class="form-group"><label class="form-label">隐藏链接</label><select id="cfg-is_hide_url"><option value="true">开启</option><option value="false">关闭</option></select></div>
+        <div class="form-group"><label class="form-label">验证SSL证书</label><select id="cfg-verify_ssl"><option value="true">开启</option><option value="false">关闭</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">图片代理</label><input type="text" id="cfg-proxy" placeholder="留空使用系统代理"></div>
+        <div class="form-group"><label class="form-label">WebUI 地址</label><input type="text" id="cfg-webui_host"></div>
+        <div class="form-group"><label class="form-label">WebUI 端口</label><input type="number" id="cfg-webui_port"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>图片配置</h3></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">读取图片</label><select id="cfg-is_read_pic"><option value="true">开启</option><option value="false">关闭</option></select></div>
+        <div class="form-group"><label class="form-label">防和谐处理</label><select id="cfg-is_adjust_pic"><option value="true">开启</option><option value="false">关闭</option></select></div>
+        <div class="form-group"><label class="form-label">每次最大图片数 (-1不限)</label><input type="number" id="cfg-max_pic_item"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Twitter 反代</label><select id="cfg-use_twitter_reverse_proxy"><option value="true">开启</option><option value="false">关闭</option></select></div>
+        <div class="form-group"><label class="form-label">反代域名</label><input type="text" id="cfg-twitter_reverse_proxy_domain"></div>
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="saveConfig()" style="padding:10px 24px">保存配置</button>
+    <span id="cfg-status" style="margin-left:12px;font-size:13px"></span>
+  </div>
+
+</main>
+
+<!-- 添加订阅弹窗 -->
+<div class="modal-overlay" id="add-modal">
+  <div class="modal">
+    <h3 id="add-modal-title">添加 RSSHub 路由订阅</h3>
+    <div class="form-group"><label class="form-label">用户标识</label><input type="text" id="add-user"></div>
+    <div class="form-group"><label class="form-label">Cron 表达式</label><input type="text" id="add-cron" value="0 * * * *">
+      <div class="cron-quick" style="margin-top:6px">
+        <button onclick="document.getElementById('add-cron').value='*/5 * * * *'">每5分钟</button>
+        <button onclick="document.getElementById('add-cron').value='0 * * * *'">每小时</button>
+        <button onclick="document.getElementById('add-cron').value='0 */6 * * *'">每6小时</button>
+        <button onclick="document.getElementById('add-cron').value='0 0 * * *'">每天0点</button>
+      </div>
+    </div>
+    <div id="add-ep-group" class="form-group"><label class="form-label">端点序号</label><input type="number" id="add-ep-idx" value="0"></div>
+    <div id="add-route-group" class="form-group"><label class="form-label">路由</label><input type="text" id="add-route" placeholder="/twitter/user/xxx"></div>
+    <div id="add-url-group" style="display:none" class="form-group"><label class="form-label">RSS URL</label><input type="url" id="add-url" placeholder="https://blog.example.com/index.xml"></div>
+    <div style="margin-bottom:8px">
+      <a href="#" onclick="toggleAddType();return false" id="add-type-toggle" style="font-size:12px;color:var(--accent)">切换到 直接URL 模式</a>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="doAddSub()">确认添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 拉取结果弹窗 -->
+<div class="modal-overlay" id="fetch-modal">
+  <div class="modal">
+    <h3>拉取结果</h3>
+    <div id="fetch-result"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Navigation ──
+document.querySelectorAll('aside nav a').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    document.querySelectorAll('aside nav a').forEach(x => x.classList.remove('active'));
+    a.classList.add('active');
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + a.dataset.tab).classList.add('active');
+    if (a.dataset.tab === 'config') loadConfig();
+  });
+});
+
+// ── Toast ──
+function toast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast toast-' + type + ' show';
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ── Endpoints ──
+async function loadEndpoints() {
+  const r = await fetch('/api/rsshub'); const data = await r.json();
+  const tbody = document.querySelector('#ep-table tbody');
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="3"><div class="empty"><div class="icon">🔗</div><p>暂无端点，在上方输入 RSSHub 地址添加</p></div></td></tr>';
+  } else {
+    tbody.innerHTML = data.map(e => `<tr><td><span class="badge badge-blue">#${e.idx}</span></td><td><code style="font-size:12px;word-break:break-all">${e.url}</code></td><td><button class="btn btn-danger btn-xs" onclick="delEndpoint(${e.idx})">删除</button></td></tr>`).join('');
+  }
+}
+async function addEndpoint() {
+  const url = document.getElementById('ep-url').value.trim();
+  if (!url) return toast('请输入 URL', 'err');
+  const r = await fetch('/api/rsshub', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url})});
+  const d = await r.json();
+  if (d.ok) { document.getElementById('ep-url').value = ''; loadEndpoints(); toast('端点已添加', 'ok'); }
+  else toast(d.error, 'err');
+}
+async function delEndpoint(idx) {
+  if (!confirm('确认删除端点 #' + idx + '？已通过此端点订阅的内容不受影响。')) return;
+  await fetch('/api/rsshub/' + idx, {method:'DELETE'});
+  loadEndpoints(); toast('已删除', 'ok');
+}
+
+// ── Subscriptions ──
+let _subsUser = '', _subsData = [];
+async function loadSubs() {
+  _subsUser = document.getElementById('sub-user').value.trim();
+  if (!_subsUser) return;
+  const r = await fetch('/api/subscriptions?user=' + encodeURIComponent(_subsUser));
+  _subsData = await r.json();
+  if (_subsData.error) { toast(_subsData.error, 'err'); return; }
+  const table = document.getElementById('sub-table'), hint = document.getElementById('sub-hint');
+  if (!_subsData.length) { table.style.display = 'none'; hint.style.display = ''; hint.innerHTML = '<div class="icon">📡</div><p>该用户暂无订阅</p>'; return; }
+  table.style.display = ''; hint.style.display = 'none';
+  document.querySelector('#sub-table tbody').innerHTML = _subsData.map((s, i) => `<tr>
+    <td><span class="badge badge-gray">#${i}</span></td>
+    <td><strong style="font-size:13px">${s.title}</strong></td>
+    <td><code style="font-size:12px">${s.cron}</code></td>
+    <td><span class="truncate" title="${s.url}" style="font-size:12px;color:var(--text2)">${s.url}</span></td>
+    <td>
+      <button class="btn btn-ghost btn-xs" onclick="showEditModal(${i})">编辑</button>
+      <button class="btn btn-primary btn-xs" onclick="fetchSub(${i})">拉取</button>
+      <button class="btn btn-danger btn-xs" onclick="delSub(${i})">删除</button>
+    </td>
+  </tr>`).join('');
+}
+async function delSub(idx) {
+  if (!confirm('确认删除「' + _subsData[idx].title + '」？')) return;
+  await fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(_subsUser), {method:'DELETE'});
+  loadSubs(); toast('已删除', 'ok');
+}
+function showEditModal(idx) {
+  const s = _subsData[idx];
+  const cron = prompt('修改 Cron 表达式:', s.cron);
+  if (!cron) return;
+  fetch('/api/subscriptions/' + idx + '?user=' + encodeURIComponent(_subsUser), {
+    method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({cron})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) { loadSubs(); toast('Cron 已更新', 'ok'); }
+    else toast(d.error, 'err');
+  });
+}
+
+// ── Add modal ──
+let _addMode = 'rsshub';
+function toggleAddType() {
+  _addMode = _addMode === 'rsshub' ? 'url' : 'rsshub';
+  const isRsshub = _addMode === 'rsshub';
+  document.getElementById('add-ep-group').style.display = isRsshub ? '' : 'none';
+  document.getElementById('add-route-group').style.display = isRsshub ? '' : 'none';
+  document.getElementById('add-url-group').style.display = isRsshub ? 'none' : '';
+  document.getElementById('add-type-toggle').textContent = isRsshub ? '切换到 直接URL 模式' : '切换到 RSSHub 路由 模式';
+  document.getElementById('add-modal-title').textContent = isRsshub ? '添加 RSSHub 路由订阅' : '添加直接 URL 订阅';
+}
+function showAddModal() {
+  document.getElementById('add-user').value = _subsUser;
+  document.getElementById('add-modal').classList.add('show');
+}
+async function doAddSub() {
+  const user = document.getElementById('add-user').value.trim();
+  const cron = document.getElementById('add-cron').value.trim() || '0 * * * *';
+  let body, path;
+  if (_addMode === 'rsshub') {
+    const epIdx = parseInt(document.getElementById('add-ep-idx').value) || 0;
+    const route = document.getElementById('add-route').value.trim();
+    if (!route) return toast('请输入路由', 'err');
+    body = {user, endpoint_idx:epIdx, route, cron}; path = '/api/subscriptions/rsshub';
+  } else {
+    const url = document.getElementById('add-url').value.trim();
+    if (!url) return toast('请输入 RSS URL', 'err');
+    body = {user, url, cron}; path = '/api/subscriptions/url';
+  }
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const d = await r.json();
+  if (d.ok) { closeModal(); loadSubs(); toast('订阅添加成功', 'ok'); }
+  else toast(d.error, 'err');
+}
+async function fetchSub(idx) {
+  document.getElementById('fetch-modal').classList.add('show');
+  document.getElementById('fetch-result').innerHTML = '<p style="color:var(--text2);padding:20px;text-align:center">加载中...</p>';
+  const r = await fetch('/api/subscriptions/' + idx + '/fetch?user=' + encodeURIComponent(_subsUser), {method:'POST'});
+  const d = await r.json();
+  const el = document.getElementById('fetch-result');
+  if (d.error) { el.innerHTML = `<p style="color:var(--red);padding:20px">${d.error}</p>`; return; }
+  el.innerHTML = `<p style="font-size:13px;color:var(--green);margin-bottom:12px"><strong>获取到 ${d.count} 条内容</strong></p>` +
+    d.items.map(i => `<div class="item"><h4>${i.title}</h4><p>${i.pubDate}</p><p style="margin-top:4px">${i.description}</p><a href="${i.link}" target="_blank">查看原文 →</a></div>`).join('');
+}
+function closeModal() {
+  document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('show'));
+}
+
+// ── Config ──
+async function loadConfig() {
+  const r = await fetch('/api/config'); const cfg = await r.json();
+  document.getElementById('cfg-title_max_length').value = cfg.title_max_length ?? 30;
+  document.getElementById('cfg-description_max_length').value = cfg.description_max_length ?? 500;
+  document.getElementById('cfg-max_items_per_poll').value = cfg.max_items_per_poll ?? 3;
+  document.getElementById('cfg-compose').value = cfg.compose ? 'true' : 'false';
+  document.getElementById('cfg-t2i').value = cfg.t2i ? 'true' : 'false';
+  document.getElementById('cfg-is_hide_url').value = cfg.is_hide_url ? 'true' : 'false';
+  document.getElementById('cfg-proxy').value = cfg.proxy ?? '';
+  document.getElementById('cfg-verify_ssl').value = cfg.verify_ssl ? 'true' : 'false';
+  document.getElementById('cfg-webui_host').value = cfg.webui_host ?? '127.0.0.1';
+  document.getElementById('cfg-webui_port').value = cfg.webui_port ?? 8888;
+  const pic = cfg.pic_config || {};
+  document.getElementById('cfg-is_read_pic').value = pic.is_read_pic ? 'true' : 'false';
+  document.getElementById('cfg-is_adjust_pic').value = pic.is_adjust_pic ? 'true' : 'false';
+  document.getElementById('cfg-max_pic_item').value = pic.max_pic_item ?? 3;
+  document.getElementById('cfg-use_twitter_reverse_proxy').value = pic.use_twitter_reverse_proxy ? 'true' : 'false';
+  document.getElementById('cfg-twitter_reverse_proxy_domain').value = pic.twitter_reverse_proxy_domain ?? 'pbs.yurucamp.cn';
+}
+async function saveConfig() {
+  function b(id) { return document.getElementById(id).value === 'true'; }
+  const body = {
+    title_max_length: parseInt(document.getElementById('cfg-title_max_length').value) || 30,
+    description_max_length: parseInt(document.getElementById('cfg-description_max_length').value) || 500,
+    max_items_per_poll: parseInt(document.getElementById('cfg-max_items_per_poll').value) || 3,
+    compose: b('cfg-compose'), t2i: b('cfg-t2i'), is_hide_url: b('cfg-is_hide_url'),
+    proxy: document.getElementById('cfg-proxy').value, verify_ssl: b('cfg-verify_ssl'),
+    webui_host: document.getElementById('cfg-webui_host').value,
+    webui_port: parseInt(document.getElementById('cfg-webui_port').value) || 8888,
+    pic_config: {
+      is_read_pic: b('cfg-is_read_pic'), is_adjust_pic: b('cfg-is_adjust_pic'),
+      max_pic_item: parseInt(document.getElementById('cfg-max_pic_item').value) || 3,
+      use_twitter_reverse_proxy: b('cfg-use_twitter_reverse_proxy'),
+      twitter_reverse_proxy_domain: document.getElementById('cfg-twitter_reverse_proxy_domain').value,
+    },
+  };
+  const r = await fetch('/api/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const d = await r.json();
+  const s = document.getElementById('cfg-status');
+  if (d.ok) { s.textContent = '✓  已保存。部分配置需重启插件后生效。'; s.style.color = 'var(--green)'; toast('配置已保存', 'ok'); }
+  else { s.textContent = d.error; s.style.color = 'var(--red)'; toast(d.error, 'err'); }
+}
+
+// Init
+loadEndpoints();
+</script>
+</body>
+</html>
