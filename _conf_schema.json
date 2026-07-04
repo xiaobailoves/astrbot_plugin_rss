@@ -63,7 +63,7 @@
         "description": "图片相关配置",
         "type": "object",
         "hint": "用于配置图片相关的参数",
-        "properties": {
+        "items": {
             "is_read_pic": {
                 "description": "是否读取rss链接中的图片",
                 "hint": "如果设置为 true 自动读取rss链接中的图片",
