@@ -126,8 +126,9 @@ tbody tr:hover { background:#f8fafc; }
       <div class="card-header">
         <h3>订阅列表</h3>
         <div style="display:flex;gap:8px">
-          <input type="text" id="sub-user" placeholder="用户标识，如 aiocqhttp:private:123456" style="width:280px;font-size:13px">
+          <input type="text" id="sub-user" placeholder="用户标识筛选（留空显示全部）" style="width:260px;font-size:13px">
           <button class="btn btn-primary" onclick="loadSubs()">查询</button>
+          <button class="btn btn-ghost" onclick="loadSubs()" title="刷新列表">↻</button>
           <button class="btn btn-success" onclick="showAddModal()">+ 添加</button>
         </div>
       </div>
@@ -424,8 +425,14 @@ async function fetchSub(idx) {
   const d = await r.json();
   const el = document.getElementById('fetch-result');
   if (d.error) { el.innerHTML = `<p style="color:var(--red);padding:20px">${d.error}</p>`; return; }
-  el.innerHTML = `<p style="font-size:13px;color:var(--green);margin-bottom:12px"><strong>获取到 ${d.count} 条内容</strong></p>` +
-    d.items.map(i => `<div class="item"><h4>${i.title}</h4><p>${i.pubDate}</p><p style="margin-top:4px">${i.description}</p><a href="${i.link}" target="_blank">查看原文 →</a></div>`).join('');
+  el.innerHTML = `<p style="font-size:13px;color:var(--green);margin-bottom:12px"><strong>获取到 ${d.count} 条内容（按时间倒序）</strong></p>` +
+    d.items.map(i => `<div class="item">
+      <h4>${i.title}</h4>
+      <p style="font-size:11px;color:var(--text3)">${i.pubDate || ''}</p>
+      <p style="margin-top:4px;white-space:pre-wrap">${i.description}</p>
+      ${(i.pic_urls || []).map(u => '<img src="' + u + '" style="max-width:100%;max-height:300px;border-radius:6px;margin-top:8px;display:block" loading="lazy" onerror="this.style.display=\'none\'">').join('')}
+      <a href="${i.link}" target="_blank" style="display:inline-block;margin-top:8px">查看原文 →</a>
+    </div>`).join('');
 }
 function closeModal() {
   document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('show'));

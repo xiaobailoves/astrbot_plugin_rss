@@ -233,11 +233,14 @@ class RssWebUI:
                 {
                     "title": item.title,
                     "link": item.link,
-                    "description": item.description[:200],
+                    "description": item.description[:300],
                     "pubDate": item.pubDate,
                     "timestamp": item.pubDate_timestamp,
+                    "pic_urls": item.pic_urls,
                 }
             )
+        # 按时间戳降序排列（最新的在前）
+        result.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
         return self._json({"url": url, "count": len(result), "items": result})
 
     # ── 配置管理 ──────────────────────────────────────────
