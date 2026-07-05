@@ -53,8 +53,12 @@ class RssImageHandler:
             logger.info(f"🔄 Twitter 反代: {original_url[:60]}... → {image_url[:60]}...")
             # 使用反代时通常为了速度会选择直连，强制将此次请求的 proxy 置空
             request_proxy = None
+        elif self.use_twitter_reverse_proxy and self.twitter_reverse_proxy_domain in image_url:
+            # URL 已经是反代域名（如 RSSHub 自身已做了反代），同样直连避免走代理失败
+            logger.debug(f"🔗 图片已是反代域名，直连: {image_url[:80]}...")
+            request_proxy = None
         elif "pbs.twimg.com" in image_url and not self.use_twitter_reverse_proxy:
-            logger.warning(f"⚠️ 检测到 Twitter 图片链接但未开启反代，可能加载失败: {image_url[:80]}...") 
+            logger.warning(f"⚠️ 检测到 Twitter 图片链接但未开启反代，可能加载失败: {image_url[:80]}...")
 
         try:
             async with self.http_session.get(image_url, proxy=request_proxy, timeout=30) as resp:
@@ -86,8 +90,8 @@ class RssImageHandler:
             tip = ""
             if "pbs.twimg.com" in image_url:
                 tip = "（提示：Twitter 图片需开启 pic_config.use_twitter_reverse_proxy）"
-            logger.error(f"图片下载失败 ({image_url[:80]}...): {e}{tip}")
+            logger.error(f"图片下载失败 ({image_url[:80]}...): {type(e).__name__}: {e}{tip}")
             return None
         except Exception as e:
-            logger.error(f"图片处理异常 ({image_url[:80]}...): {e}")
+            logger.error(f"图片处理异常 ({image_url[:80]}...): {type(e).__name__}: {e}")
             return None
