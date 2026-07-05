@@ -1,5 +1,6 @@
 from PIL import Image
 import aiohttp
+import asyncio
 import random
 import base64
 import logging
@@ -66,6 +67,11 @@ class RssImageHandler:
                     logger.error(f"图片下载失败: {image_url}, 状态码: {resp.status}")
                     return None
 
+                content_type = resp.headers.get("Content-Type", "")
+                if not content_type.startswith("image/"):
+                    logger.error(f"图片下载失败: {image_url[:80]}..., 响应非图片类型: {content_type}")
+                    return None
+
                 content = await resp.read()
                 img_data = BytesIO(content)
 
@@ -86,7 +92,7 @@ class RssImageHandler:
                 else:
                     return base64.b64encode(content).decode("utf-8")
 
-        except aiohttp.ClientError as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             tip = ""
             if "pbs.twimg.com" in image_url:
                 tip = "（提示：Twitter 图片需开启 pic_config.use_twitter_reverse_proxy）"
