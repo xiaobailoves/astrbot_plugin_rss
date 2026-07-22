@@ -2,6 +2,7 @@ from PIL import Image
 import aiohttp
 import asyncio
 import random
+import re
 import base64
 import logging
 from io import BytesIO
@@ -61,43 +62,70 @@ class RssImageHandler:
         elif "pbs.twimg.com" in image_url and not self.use_twitter_reverse_proxy:
             logger.warning(f"⚠️ 检测到 Twitter 图片链接但未开启反代，可能加载失败: {image_url[:80]}...")
 
-        try:
-            async with self.http_session.get(image_url, proxy=request_proxy, timeout=30) as resp:
-                if resp.status != 200:
-                    logger.error(f"图片下载失败: {image_url}, 状态码: {resp.status}")
-                    return None
+        # 渐进降级下载：orig → large → medium
+        qualities = ["orig", "large", "medium"]
+        content = None
 
-                content_type = resp.headers.get("Content-Type", "")
-                if not content_type.startswith("image/"):
-                    logger.error(f"图片下载失败: {image_url[:80]}..., 响应非图片类型: {content_type}")
-                    return None
+        for i, quality in enumerate(qualities):
+            attempt_url = re.sub(r'name=\w+', f'name={quality}', image_url)
+            is_last = (i == len(qualities) - 1)
 
-                content = await resp.read()
-                img_data = BytesIO(content)
+            try:
+                async with self.http_session.get(attempt_url, proxy=request_proxy, timeout=15) as resp:
+                    if resp.status != 200:
+                        if not is_last:
+                            logger.debug(f"⬇️ 降级: name={quality} 返回 {resp.status}，尝试下一级")
+                            continue
+                        logger.error(f"图片下载失败: {attempt_url}, 状态码: {resp.status}")
+                        return None
 
-                if self.is_adjust_pic:
-                    img = Image.open(img_data)
-                    img = img.convert("RGB")
-                    width, height = img.size
-                    pixels = img.load()
+                    content_type = resp.headers.get("Content-Type", "")
+                    if not content_type.startswith("image/"):
+                        if not is_last:
+                            logger.debug(f"⬇️ 降级: name={quality} 非图片响应，尝试下一级")
+                            continue
+                        logger.error(f"图片下载失败: {attempt_url[:80]}..., 响应非图片类型: {content_type}")
+                        return None
 
-                    # 随机修改一个角
-                    corners = [(0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1)]
-                    chosen = random.choice(corners)
-                    pixels[chosen[0], chosen[1]] = color
+                    content = await resp.read()
+                    if i > 0:
+                        logger.info(f"✅ 降级成功: name={quality} ({len(content)} bytes)")
+                    break  # 下载成功，跳出循环
 
-                    output_buffer = BytesIO()
-                    img.save(output_buffer, format="JPEG")
-                    return base64.b64encode(output_buffer.getvalue()).decode("utf-8")
-                else:
-                    return base64.b64encode(content).decode("utf-8")
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                if not is_last:
+                    logger.debug(f"⬇️ 降级: name={quality} {type(e).__name__}，尝试下一级")
+                    continue
+                tip = ""
+                if "pbs.twimg.com" in image_url:
+                    tip = "（提示：Twitter 图片需开启 pic_config.use_twitter_reverse_proxy）"
+                logger.error(f"图片下载失败 ({image_url[:80]}...): {type(e).__name__}: {e}{tip}")
+                return None
 
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            tip = ""
-            if "pbs.twimg.com" in image_url:
-                tip = "（提示：Twitter 图片需开启 pic_config.use_twitter_reverse_proxy）"
-            logger.error(f"图片下载失败 ({image_url[:80]}...): {type(e).__name__}: {e}{tip}")
+        if content is None:
             return None
+
+        # 图片处理
+        try:
+            img_data = BytesIO(content)
+
+            if self.is_adjust_pic:
+                img = Image.open(img_data)
+                img = img.convert("RGB")
+                width, height = img.size
+                pixels = img.load()
+
+                # 随机修改一个角
+                corners = [(0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1)]
+                chosen = random.choice(corners)
+                pixels[chosen[0], chosen[1]] = color
+
+                output_buffer = BytesIO()
+                img.save(output_buffer, format="JPEG")
+                return base64.b64encode(output_buffer.getvalue()).decode("utf-8")
+            else:
+                return base64.b64encode(content).decode("utf-8")
+
         except Exception as e:
             logger.error(f"图片处理异常 ({image_url[:80]}...): {type(e).__name__}: {e}")
             return None
