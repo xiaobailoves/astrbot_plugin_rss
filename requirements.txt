@@ -1,5 +1,5 @@
 aiohttp>=3,<4
 apscheduler>=3,<4
 beautifulsoup4>=4,<5
-lxml>=4,<6
+feedparser>=6,<7
 pillow>=9

@@ -1,9 +1,10 @@
 import os
 import json
+import asyncio
+import feedparser
 import tempfile
 import logging
 from urllib.parse import urlparse
-from lxml import etree
 from bs4 import BeautifulSoup
 import re
 
@@ -14,6 +15,12 @@ class DataHandler:
             "rsshub_endpoints": []
         }
         self.data = self.load_data()
+        self._lock = asyncio.Lock()
+
+    @property
+    def lock(self):
+        """异步锁，外部调用者可用 async with self.lock: 保护读-改-写周期"""
+        return self._lock
 
     def get_subs_channel_url(self, user_id) -> list:
         """获取用户订阅的频道 url 列表"""
@@ -43,26 +50,26 @@ class DataHandler:
                 json.dump(self.default_config, f, indent=2, ensure_ascii=False)
             return self.default_config.copy()
 
-    def save_data(self):
-        """保存数据到数据文件（原子写入，防止崩溃时文件损坏）"""
-        dirname = os.path.dirname(self.config_path) or "."
-        with tempfile.NamedTemporaryFile(
-            "w", delete=False, dir=dirname, suffix=".tmp", encoding="utf-8"
-        ) as f:
-            json.dump(self.data, f, indent=2, ensure_ascii=False)
-            tmp_path = f.name
-        os.replace(tmp_path, self.config_path)
+    async def save_data(self):
+        """保存数据到数据文件（原子写入，异步锁保护并发）"""
+        async with self._lock:
+            dirname = os.path.dirname(self.config_path) or "."
+            os.makedirs(dirname, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                "w", delete=False, dir=dirname, suffix=".tmp", encoding="utf-8"
+            ) as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
+                tmp_path = f.name
+            os.replace(tmp_path, self.config_path)
 
     def parse_channel_text_info(self, text):
-        """解析RSS频道信息"""
+        """解析RSS频道信息（feedparser 统一 RSS/Atom/RDF）"""
         try:
-            root = etree.fromstring(text)
-            title_node = root.xpath("//title")
-            desc_node = root.xpath("//description")
-            title = title_node[0].text if title_node and title_node[0].text else "未知频道"
-            description = desc_node[0].text if desc_node and desc_node[0].text else ""
+            feed = feedparser.parse(text)
+            title = feed.feed.get("title", "未知频道")
+            description = feed.feed.get("description", "") or feed.feed.get("subtitle", "")
             return title, description
-        except (etree.XMLSyntaxError, IndexError, AttributeError):
+        except Exception:
             return "未知频道", ""
 
     def parse_html_text_and_pics(self, html) -> tuple:

@@ -56,13 +56,18 @@ class RssWebUI:
         self.app.router.add_post("/api/reload", self._reload_scheduler)
 
     async def start(self):
-        runner = web.AppRunner(self.app)
-        await runner.setup()
-        site = web.TCPSite(runner, self.host, self.port)
+        self._runner = web.AppRunner(self.app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, self.host, self.port)
         await site.start()
         self.plugin.logger.info(
             f"RSS WebUI 已启动 → http://{self.host}:{self.port}"
         )
+
+    async def stop(self):
+        """关闭 WebUI，清理 AppRunner 资源"""
+        if hasattr(self, '_runner'):
+            await self._runner.cleanup()
 
     # ── 静态页面 ──────────────────────────────────────────
 
@@ -114,7 +119,7 @@ class RssWebUI:
         if url in self.plugin.data_handler.data.get("rsshub_endpoints", []):
             return self._json({"error": "该端点已存在"}, 409)
         self.plugin.data_handler.data["rsshub_endpoints"].append(url)
-        self.plugin.data_handler.save_data()
+        await self.plugin.data_handler.save_data()
         return self._json({"ok": True})
 
     async def _del_endpoint(self, request):
@@ -123,7 +128,7 @@ class RssWebUI:
         if idx < 0 or idx >= len(eps):
             return self._json({"error": "索引越界"}, 404)
         eps.pop(idx)
-        self.plugin.data_handler.save_data()
+        await self.plugin.data_handler.save_data()
         return self._json({"ok": True})
 
     # ── 订阅管理 ──────────────────────────────────────────
@@ -222,7 +227,7 @@ class RssWebUI:
         if not self.plugin.data_handler.data[url]["subscribers"]:
             self.plugin.data_handler.data.pop(url)
         self.plugin._remove_single_job(url, user)
-        self.plugin.data_handler.save_data()
+        await self.plugin.data_handler.save_data()
         return self._json({"ok": True})
 
     async def _update_subscription(self, request):
@@ -237,7 +242,7 @@ class RssWebUI:
             return self._json({"error": "索引越界"}, 404)
         url = subs_urls[idx]
         self.plugin.data_handler.data[url]["subscribers"][user]["cron_expr"] = cron
-        self.plugin.data_handler.save_data()
+        await self.plugin.data_handler.save_data()
         self.plugin._remove_single_job(url, user)
         self.plugin._add_single_job(url, user, cron)
         return self._json({"ok": True})
@@ -286,7 +291,11 @@ class RssWebUI:
         body = await self._body(request)
         for key, value in body.items():
             self.plugin.config[key] = value
-        self.plugin.data_handler.save_data()
+        # 持久化到 data_handler 的 settings 中，重启后不丢失
+        self.plugin.data_handler.data.setdefault("settings", {})
+        saved_overrides = self.plugin.data_handler.data["settings"].setdefault("config", {})
+        saved_overrides.update(body)
+        await self.plugin.data_handler.save_data()
         return self._json({"ok": True, "note": "部分配置可能需要重启插件后生效"})
 
 

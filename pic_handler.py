@@ -13,7 +13,7 @@ logger = logging.getLogger("astrbot")
 class RssImageHandler:
     """RSS 图片处理类，支持通过代理或反代获取图片"""
 
-    def __init__(self, is_adjust_pic=False, proxy=None, use_twitter_reverse_proxy=False, twitter_reverse_proxy_domain="pbs.yurucamp.cn"):
+    def __init__(self, is_adjust_pic=False, proxy=None, use_twitter_reverse_proxy=False, twitter_reverse_proxy_domain="pbs.yurucamp.cn", session: aiohttp.ClientSession = None):
         """
         初始化图片处理类
 
@@ -22,18 +22,25 @@ class RssImageHandler:
             proxy (str): 代理地址，例如 'http://127.0.0.1:7890'。
             use_twitter_reverse_proxy (bool): 是否启用推特图片反代
             twitter_reverse_proxy_domain (str): 推特图片反代域名
+            session (aiohttp.ClientSession): 可选的外部 HTTP 会话，传入则共享，不传入则自建
         """
         self.is_adjust_pic = is_adjust_pic
         self.proxy = proxy
         self.use_twitter_reverse_proxy = use_twitter_reverse_proxy
         self.twitter_reverse_proxy_domain = twitter_reverse_proxy_domain
-        # 复用 HTTP Session
-        self.http_session = aiohttp.ClientSession(
+        # HTTP Session：优先使用外部传入的 session，否则自建
+        self._owns_session = session is None
+        self.http_session = session if session is not None else aiohttp.ClientSession(
             trust_env=True,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             },
         )
+
+    async def close(self):
+        """关闭 HTTP 会话（仅在自建 session 时执行）"""
+        if self._owns_session and not self.http_session.closed:
+            await self.http_session.close()
 
     async def modify_corner_pixel_to_base64(self, image_url, color=(255, 255, 255)):
         """
@@ -62,8 +69,10 @@ class RssImageHandler:
         elif "pbs.twimg.com" in image_url and not self.use_twitter_reverse_proxy:
             logger.warning(f"⚠️ 检测到 Twitter 图片链接但未开启反代，可能加载失败: {image_url[:80]}...")
 
-        # 渐进降级下载：orig → large → medium
+        # 渐进降级下载：orig → large → medium（仅有 name= 参数时生效）
         qualities = ["orig", "large", "medium"]
+        if "name=" not in image_url:
+            qualities = qualities[:1]  # URL 没有 name= 参数，不降级，只请求一次
         content = None
 
         for i, quality in enumerate(qualities):
@@ -80,11 +89,14 @@ class RssImageHandler:
                         return None
 
                     content_type = resp.headers.get("Content-Type", "")
-                    if not content_type.startswith("image/"):
+                    # 只拒绝明确是文本/错误响应的类型，其余交给 PIL 验证
+                    # 避免因 CDN Content-Type 不规范（空值、binary/octet-stream、各种 image/* 变体等）而误杀合法图片
+                    _text_ct = ("text/html", "text/plain", "application/json", "application/xml", "text/xml")
+                    if content_type and any(content_type.startswith(t) for t in _text_ct):
                         if not is_last:
-                            logger.debug(f"⬇️ 降级: name={quality} 非图片响应，尝试下一级")
+                            logger.debug(f"⬇️ 降级: name={quality} Content-Type={content_type}，尝试下一级")
                             continue
-                        logger.error(f"图片下载失败: {attempt_url[:80]}..., 响应非图片类型: {content_type}")
+                        logger.error(f"图片下载失败: {attempt_url[:80]}..., 响应为文本类型: {content_type}")
                         return None
 
                     content = await resp.read()
@@ -105,12 +117,12 @@ class RssImageHandler:
         if content is None:
             return None
 
-        # 图片处理
+        # 图片处理：始终用 PIL 验证内容是否为合法图片，防止非图片内容穿透
         try:
             img_data = BytesIO(content)
+            img = Image.open(img_data)  # PIL 验证，非图片会在此抛出异常
 
             if self.is_adjust_pic:
-                img = Image.open(img_data)
                 img = img.convert("RGB")
                 width, height = img.size
                 pixels = img.load()
