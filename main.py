@@ -141,9 +141,10 @@ class RssPlugin(Star):
 
             async with self.http_session.get(url, headers=headers) as resp:
                 if resp.status == 304:
-                    return None  # 内容未更新
+                    self.logger.debug(f"rss: {url} 内容未更新 (304)")
+                    return None  # 内容未更新，非错误
                 if resp.status != 200:
-                    self.logger.error(f"rss: 无法正常打开站点 {url}")
+                    self.logger.error(f"rss: 无法正常打开站点 {url}, 状态码: {resp.status}")
                     return None
 
                 etag = resp.headers.get("ETag")
@@ -320,7 +321,8 @@ class RssPlugin(Star):
         else:
             text = raw_text
         if text is None:
-            self.logger.error(f"rss: 无法解析站点 {url} 的RSS信息")
+            # 可能是网络错误（已在 parse_channel_info 中记录）或 304 未更新
+            self.logger.info(f"rss: {url} 无新内容或请求失败")
             return []
 
         feed = feedparser.parse(text)
