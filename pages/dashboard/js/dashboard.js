@@ -194,7 +194,7 @@ function subscriptions(app) {
       tbody.appendChild(tr);
     });
     const tbl = h('table');
-    tbl.innerHTML = '<thead><tr><th>频道</th><th>用户</th><th>Cron</th><th>模型</th><th style="width:170px">操作</th></tr></thead>';
+    tbl.innerHTML = '<thead><tr><th style="width:auto">频道</th><th style="width:1%;white-space:nowrap">用户</th><th style="width:1%;white-space:nowrap">Cron</th><th style="width:1%;white-space:nowrap">模型</th><th style="width:150px">操作</th></tr></thead>';
     tbl.appendChild(tbody);
     list.appendChild(tbl);
   }
