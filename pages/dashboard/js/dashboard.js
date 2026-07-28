@@ -1,10 +1,9 @@
 /* RSS Dashboard */
 
-const B = window.AstrBotPluginPage;
-
+function _B() { return window.AstrBotPluginPage; }
 const $ = {
-  get: (p, q) => B.apiGet(p, q || {}).then(r => (r.ok !== undefined ? (r.ok ? r : Promise.reject(r.error)) : r)),
-  post: (p, d) => B.apiPost(p, d || {}).then(r => (r.ok !== undefined ? (r.ok ? r : Promise.reject(r.error)) : r)),
+  get: (p, q) => _B().apiGet(p, q || {}).then(r => (r.ok !== undefined ? (r.ok ? r : Promise.reject(r.error)) : r)),
+  post: (p, d) => _B().apiPost(p, d || {}).then(r => (r.ok !== undefined ? (r.ok ? r : Promise.reject(r.error)) : r)),
 };
 
 /* ── Toast ── */
@@ -434,8 +433,17 @@ function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.
 
 /* ── Init ── */
 (async () => {
-  if (!B) { document.body.innerHTML = '<div style="text-align:center;padding:80px 20px;color:#8b949e;font-size:15px;">请在 AstrBot 仪表盘中打开</div>'; return; }
-  try { await B.ready(); } catch (e) { /* */ }
+  // 轮询等待 bridge 注入（最多等 5 秒）
+  for (let i = 0; i < 50; i++) {
+    if (window.AstrBotPluginPage) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  const bridge = window.AstrBotPluginPage;
+  if (!bridge) {
+    document.body.innerHTML = '<div style="text-align:center;padding:80px 20px;color:#8b949e;font-size:15px;">请在 AstrBot 仪表盘中打开<br><small style="color:#ccc">若已从仪表盘打开，请升级 AstrBot 到最新版本</small></div>';
+    return;
+  }
+  try { await bridge.ready(); } catch (e) { /* */ }
   await load();
   try { const r = await $.post('reload'); document.getElementById('info').textContent = r.jobs + ' 个任务'; } catch (e) { /* */ }
   window.addEventListener('resize', () => charts.forEach(c => { try { c.resize(); } catch (e) { /* */ } }));
