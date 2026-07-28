@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RSS 管理</title>
+<link rel="stylesheet" href="./css/dashboard.css" />
+</head>
+<body>
+
+<div class="topbar">
+  <h1>RSS 管理</h1>
+  <span id="info"></span>
+</div>
+
+<div class="tabs" id="tabs">
+  <button class="on" data-t="overview">概览</button>
+  <button data-t="subs">订阅</button>
+  <button data-t="rsshub">端点</button>
+  <button data-t="history">历史</button>
+  <button data-t="config">配置</button>
+  <button data-t="logs">日志</button>
+</div>
+
+<div class="main" id="app"></div>
+
+<script src="./js/echarts.min.js"></script>
+<script src="./js/dashboard.js"></script>
+</body>
+</html>

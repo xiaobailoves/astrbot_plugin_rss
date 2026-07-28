@@ -26,9 +26,9 @@ class DataHandler:
         """获取用户订阅的频道 url 列表"""
         subs_url = []
         for url, info in self.data.items():
-            if url == "rsshub_endpoints" or url == "settings":
+            if url == "rsshub_endpoints" or url == "settings" or url.startswith("_"):
                 continue
-            if user_id in info["subscribers"]:
+            if user_id in info.get("subscribers", {}):
                 subs_url.append(url)
         return subs_url
 
@@ -80,8 +80,12 @@ class DataHandler:
             img_src = img.get("src")
             if img_src:
                 ordered_content.append(img_src)
-        text = soup.get_text()
-        return re.sub(r"\n+", "\n", text), ordered_content
+        text = soup.get_text(separator="\n")
+        # 合并 inline 元素间的单换行为空格，保留段落分隔（双换行 → 单换行）
+        text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
+        text = re.sub(r"\n{2,}", "\n", text)
+        text = re.sub(r" {2,}", " ", text)
+        return text.strip(), ordered_content
 
     def strip_html_pic(self, html)-> list[str]:
         """解析HTML内容，提取图片地址（已废弃，保留兼容）"""

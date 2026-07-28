@@ -59,29 +59,6 @@
         "obvious_hint": true,
         "default": true
     },
-    "webui_host": {
-        "description": "WebUI 监听地址",
-        "type": "string",
-        "hint": "Web 管理后台的监听地址。默认 127.0.0.1 (仅本机访问)。如需局域网访问可设为 0.0.0.0。",
-        "obvious_hint": true,
-        "default": "0.0.0.0"
-    },
-    "webui_port": {
-        "description": "WebUI 监听端口",
-        "type": "int",
-        "hint": "Web 管理后台的监听端口。",
-        "obvious_hint": true,
-        "default": 9999,
-        "minimum": 1024,
-        "maximum": 65535
-    },
-    "webui_token": {
-        "description": "WebUI 访问令牌",
-        "type": "string",
-        "hint": "设置后访问 WebUI 需要输入此令牌。留空则不验证。",
-        "obvious_hint": true,
-        "default": ""
-    },
     "pic_config": {
         "description": "图片相关配置",
         "type": "object",

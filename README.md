@@ -1,165 +1,182 @@
 # astrbot-plugin-rss
 
-✨ Get Everything You Want to Know / 获取你想知道的一切。✨
+✨ 支持 RSSHub 路由和直连 URL 订阅 RSS / Atom / JSON Feed，定时推送到聊天平台。
 
-支持通过 RSSHub 路由和直接 URL 订阅 RSS 源，并定时获取最新的 RSS 内容。
-
-<img width=300 src="https://github.com/user-attachments/assets/16886f57-886c-4aad-abd1-2edd5d1f2c06">
+---
 
 ## 功能
 
-- 添加、列出和删除 RSSHub endpoint
-- 通过 RSSHub 路由订阅 RSS 源
-- 直接通过 URL 订阅 RSS 源
-- 列出所有订阅
-- 删除订阅
-- 获取最新一条订阅内容
+- **多源订阅** — RSSHub 路由 + 直连 URL，支持 RSS 2.0 / Atom / JSON Feed
+- **定时推送** — Cron 表达式 + 快捷词控制频率，APScheduler 调度，输入校验
+- **暂停/恢复** — `/rss pause` 临时关掉刷屏源，`/rss resume` 恢复
+- **可定制排版** — `models/` 目录下新建 `.py` 文件即可自定义推送样式（内置 default / twitter / compose）
+- **智能去重** — SHA-256 指纹，同一条目不重复推送
+- **图片支持** — 自动拉取 RSS 图片，Twitter 反代 & 防和谐处理
+- **合并转发** — QQ 平台多条打包为合并转发消息
+- **失败重试** — 推送失败自动重试，不可恢复错误（封禁/会话不存在）自动跳过
+- **域名限速** — 同域名最多 3 个并发请求，友好对待上游服务器
+- **带宽节省** — ETag/304 + 60 秒 Feed 内容缓存，避免重复下载
+- **统计面板** — `/rss stats` 查看订阅数、推送量、待重试数
+- **Web 管理** — AstrBot 仪表盘内嵌，订阅/端点/历史/配置一站管理
+- **启动校验** — 非法配置自动修正并告警
 
-## 指令描述
+---
 
-### RSSHub 相关指令
+## 指令参考
 
-- `/rss rsshub add <url>`: 添加一个 RSSHub endpoint
-- `/rss rsshub list`: 列出所有 RSSHub endpoint
-- `/rss rsshub remove <idx>`: 删除一个 RSSHub endpoint
+### RSSHub 端点
 
-### 订阅相关指令
+| 指令 | 说明 |
+|---|---|
+| `/rss rsshub add <url>` | 添加端点 |
+| `/rss rsshub list` | 列出端点 |
+| `/rss rsshub remove <idx>` | 删除端点 |
 
-- `/rss add <idx> <route> <cron_expr>`: 通过 RSSHub 路由给当前会话的增加一条订阅
-- `/rss add-url <url> <cron_expr>`: 给当前会话直接增加一条自定义的订阅
-- `/rss list`: 列出当前会话的所有订阅
-- `/rss remove <idx>`: 删除当前会话指定序号的订阅
-- `/rss get <idx>`: 获取当前会话的指定序号中最新一条的订阅内容
+### 订阅
 
-## Cron 表达式教程
+| 指令 | 说明 |
+|---|---|
+| `/rss add <idx> <route> <分> <时> <日> <月> <周> [模型]` | RSSHub 路由订阅 |
+| `/rss add-url <url> <分> <时> <日> <月> <周> [模型]` | 直连 URL 订阅 |
+| `/rss test <url>` | 预览 Feed，确认内容质量 |
+| `/rss list` | 列出当前会话订阅（暂停的标 ⏸️） |
+| `/rss get <idx>` | 手动拉取最新条目 |
+| `/rss pause <idx>` | 暂停订阅（停止推送但不删除） |
+| `/rss resume <idx>` | 恢复订阅 |
+| `/rss update <idx> <分> <时> <日> <月> <周> [模型]` | 修改 Cron 或模型 |
+| `/rss remove <idx>` | 删除订阅 |
 
-Cron 表达式格式：`* * * * *`，分别表示分钟、小时、日、月、星期，`*` 表示任意值，支持范围和逗号分隔。例：
+### 工具
 
-1. `0 0 * * *` 表示每天 0 点触发。
-2. `0/5 * * * *` 表示每 5 分钟触发。
-3. `0 9-18 * * *` 表示每天 9 点到 18 点触发。
-4. `0 0 1,15 * *` 表示每月 1 号和 15 号 0 点触发。
+| 指令 | 说明 |
+|---|---|
+| `/rss cron` | 列出 Cron 快捷词 |
+| `/rss cron <表达式>` | 解释表达式的含义 |
+| `/rss stats` | 查看订阅/推送统计 |
+| `/rss history [条数]` | 推送历史（默认 10，最多 50） |
 
-星期的取值范围是 0-6，0 表示星期天。
+---
 
-## 安装
+## 快速开始
 
-参考 AstrBot 安装插件方式。
+### 1. RSSHub 订阅
 
-## 使用
+```
+/rss rsshub add https://rsshub.app
+/rss test 0 /bilibili/user/dynamic/45678          # 先预览
+/rss add 0 /bilibili/user/dynamic/45678 0 * * * * # 正式订阅
+```
 
-### 从 RSSHub 订阅内容
+路由参考 [RSSHub 文档](https://docs.rsshub.app/zh/routes/popular)。
 
-首先使用指令 `/rss rsshub add https://rsshub.app` 添加官方 RSSHub 订阅站。
+### 2. 直连 URL 订阅
 
-然后使用指令 `/rss rsshub list` 查看刚刚添加的订阅站。
+```
+/rss test https://blog.example.com/feed.xml
+/rss add-url https://blog.example.com/feed.xml 0 * * * *
+```
 
-官方维护了很多可用的路由，涵盖了 Telegram Channel、Bilibili、金融信息、高校官网信息等等。可参考 RSSHub 官方维护的路由：https://docs.rsshub.app/zh/routes/popular
+### 3. 指定排版模型
 
-找到自己想订阅的内容，根据其中的 Route、Example、Parameters 组装成最终的路由，如 `/cls/telegraph`（只需要路由名即可，不要加前面的 `https://rsshub.app` ）
+```
+/rss add-url https://rsshub.app/twitter/user/xxx 0 * * * * twitter
+/rss update 0 0 * * * * twitter
+```
 
-然后使用指令 `/rss add 0 /cls/telegraph 0 * * * *` 订阅消息，每小时拉取一次。第一个 0 表示使用的是 list 中第 0 个 RSSHub 站。
+### 4. 日常管理
 
-> 鼓励自己搭建 RSSHub 订阅站。
+```
+/rss list                 # 查看所有订阅
+/rss pause 0              # 刷屏了，先暂停
+/rss resume 0             # 恢复了，继续
+/rss stats                # 看看整体情况
+/rss history 20           # 最近 20 条推送
+```
 
+---
 
-### 从自定义链接订阅内容
+## Cron 表达式
 
-你可以使用指令 `/rss add-url <url> <cron_expr>` 订阅。
+格式：`分钟 小时 日 月 星期`（星期 0=周日）。输错当场提示，不会存脏数据。
 
-如 `/rss add-url https://blog.lwl.lol/index.xml 0 * * * *`。
+| 示例 | 含义 |
+|---|---|
+| `0 * * * *` | 每小时整点 |
+| `0 9 * * *` | 每天 9:00 |
+| `*/30 * * * *` | 每 30 分钟 |
+| `0 9-18 * * *` | 每天 9–18 点每小时 |
+| `0 9 * * 1-5` | 工作日 9:00 |
 
-请注意目前仅支持 RSS 2.0 格式。
+用 `/rss cron` 查看内置快捷词和解释任意表达式。
 
-## 配置
+---
 
-~~插件成功启动后，配置文件位于 `data/astrbot_plugin_rss_data.json`。~~
+## 自定义排版
 
-原配置文件，现已根据文档更新，请在Astrbot的插件管理中进行设置。
+在 `src/models/` 下新建 `.py` 文件，模板模式 6 行搞定：
 
-### 基础配置
+```python
+# src/models/minimal.py
+from .base import BaseRenderer
 
-`title_max_length`
+class MinimalRenderer(BaseRenderer):
+    name = "minimal"
+    template = "📌 {title}\n🔗 {link}"
+```
 
-- **描述:** 推送消息的标题最大长度。
-- **类型:** 整数 (`int`)
-- **默认值:** `30`
+订阅时指定：`/rss add-url ... minimal`
 
-`description_max_length`
+模板变量：`{chan_title}` `{title}` `{link}` `{time}` `{description}`
 
-- **描述:** 推送消息的描述内容最大长度。
-- **类型:** 整数 (`int`)
-- **默认值:** `500`
+详细教程见 [`src/models/README.md`](src/models/README.md)。
 
-`t2i` (Text to Image)
+---
 
-- **描述:** 是否将文字内容转换为图片进行发送。
-- **类型:** 布尔值 (`bool`)
-- **提示：**订阅中的图片内容会丢失
-- **默认值:** `false`
+## 配置项
 
-`max_items_per_poll`
+在 AstrBot 插件管理中修改。
 
-- **描述:** 每次从数据源获取的最大条目数。
-- **类型:** 整数 (`int`)
-- **提示:** 设置为 `-1` 表示不限制获取的条目数。
-- **默认值:** `3`
+| 配置项 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `title_max_length` | int | 30 | 标题最大长度（1–200） |
+| `description_max_length` | int | 500 | 正文最大长度（1–10000） |
+| `max_items_per_poll` | int | 3 | 每次最大条目数，-1 不限制 |
+| `compose` | bool | true | QQ 合并转发 |
+| `t2i` | bool | false | 文字转图片（图片会丢失） |
+| `is_hide_url` | bool | false | 隐藏推送链接 |
+| `proxy` | string | — | 图片代理，如 `http://127.0.0.1:7890` |
+| `verify_ssl` | bool | true | HTTPS 证书验证 |
 
-`is_hide_url`
+**`pic_config`**：
 
-- **描述:** 是否在推送的消息中隐藏原始链接。
-- **类型:** 布尔值 (`bool`)
-- **提示:** 如果设置为 `true`，推送的消息中将不会显示链接，这有助于解决因发送链接可能导致的风控问题。
-- **默认值:** `false`
+| 配置项 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `is_read_pic` | bool | false | 读取 RSS 图片 |
+| `max_pic_item` | int | 3 | 每次最大图片数，-1 不限制 |
+| `is_adjust_pic` | bool | false | 修改角落像素（防和谐） |
+| `use_twitter_reverse_proxy` | bool | false | Twitter 图片反代 |
+| `twitter_reverse_proxy_domain` | string | `pbs.yurucamp.cn` | 反代域名 |
 
-`compose`
+---
 
-- **描述:** （仅限qq）是否将消息合并，以转发的方式组合发送。
-- **类型:** 布尔值 (`bool`)
-- **提示:** 如果设置为 `true`，会以转发的方式组合发送（建议开启，以规避qq的消息频率检测）。
-- **默认值:** `true`
+## Web 管理面板
 
+AstrBot 仪表盘 → 插件页面 → RSS 管理，支持：
 
+- 📋 订阅增删改查、暂停/恢复、手动拉取、Cron 预设
+- 🔗 RSSHub 端点管理
+- 📜 推送历史查看
+- 📊 统计面板
+- 📝 插件日志实时查看
+- ⚙️ 配置在线修改
 
-### 图片配置 
+---
 
-本部分包含与图片处理相关的配置。
+## 注意事项
 
-`pic_config.is_read_pic`
+- QQ 官方平台（`qqofficial`）主动消息限制严格，不建议定时推送
+- Twitter 图片需开启 `pic_config.use_twitter_reverse_proxy`
+- 同域名并发请求上限 3 个，超出自动排队
+- 数值配置项启动时自动校验，非法值回退默认值
 
-- **描述:** 是否自动读取 RSS 链接中的图片。
-- **类型:** 布尔值 (`bool`)
-- **提示:** 如果设置为 `true`，程序会自动尝试获取 RSS 链接中的图片。
-- **默认值:** `false`
-
-`pic_config.is_adjust_pic`
-
-- **描述:** 是否对读取到的图片进行防和谐处理。
-- **类型:** 布尔值 (`bool`)
-- **提示:** 如果设置为 `true`，程序会在读取到的图片四个角的像素点上添加随机像素，以尝试规避和谐。
-- **默认值:** `false`
-
-`pic_config.max_pic_item`
-
-- **描述:** 每次处理图片的最大条目数。
-- **类型:** 整数 (`int`)
-- **提示:** 设置为 `-1` 表示不限制每次转换的图片条目数。
-- **默认值:** `3`
-
-
-
-## Q&A
-
-Q： #13 bot会重复发送同一条消息多次，次数会不停增加。
-
-A： 更新rss配置时，由于AsyncIOScheduler没正常删除旧任务导致的，重启Astrbot可以解决，在接下来版本中计划修复该问题。
-
-
-
-## 限制
-
-由于 QQ 官方对主动消息限制较为严重，因此主动推送不支持 qqofficial 消息平台。
-
-## 贡献
-
-欢迎提交 issue 和 pull request 来帮助改进这个项目。
+[GitHub](https://github.com/xiaobailoves/astrbot_plugin_rss)
