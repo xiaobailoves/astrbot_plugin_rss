@@ -199,12 +199,21 @@ class RssWebApi:
         idx = data.get("idx", -1)
         cron = data.get("cron", "0 * * * *")
         renderer = data.get("renderer")
+        new_user = data.get("new_user", "")
         if not user:
             return jsonify({"error": "缺少 user 参数"}), 400
         subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
         if idx < 0 or idx >= len(subs_urls):
             return jsonify({"error": "索引越界"}), 404
         url = subs_urls[idx]
+
+        if new_user and new_user != user:
+            # 转移订阅到新用户/群聊
+            old_sub = self._plugin.data_handler.data[url]["subscribers"].pop(user)
+            self._plugin.data_handler.data[url]["subscribers"][new_user] = old_sub
+            self._plugin._remove_single_job(url, user)
+            user = new_user
+
         sub = self._plugin.data_handler.data[url]["subscribers"][user]
         sub["cron_expr"] = cron
         if renderer:

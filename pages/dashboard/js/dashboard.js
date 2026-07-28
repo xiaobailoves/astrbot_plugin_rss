@@ -170,29 +170,11 @@ function overview(app) {
 /* ═══════════════════════ 订阅 ═══════════════════════ */
 
 function subscriptions(app) {
-  app.appendChild(h('div', { className: 'card' },
-    h('h3', {}, '添加订阅'),
-    h('div', { className: 'f-row' },
-      h('div', {}, h('span', { className: 'f-label' }, '方式'), h('select', { id: 's-type' }, h('option', { value: 'rsshub' }, 'RSSHub'), h('option', { value: 'url' }, '直连 URL'))),
-      h('div', {}, h('span', { className: 'f-label' }, '端点'), h('select', { id: 's-ep' }, ...st.eps.map((e, i) => h('option', { value: i }, e.url)))),
-      h('div', {}, h('span', { className: 'f-label' }, '用户'), h('input', { id: 's-user', placeholder: 'aiocqhttp:...' })),
-      h('div', {}, h('span', { className: 'f-label' }, '路由'), h('input', { id: 's-route', placeholder: '/twitter/user/xxx' })),
-      h('div', {}, h('span', { className: 'f-label' }, 'URL'), h('input', { id: 's-url', placeholder: 'https://...' })),
-      h('div', {}, h('span', { className: 'f-label' }, 'Cron'), h('input', { id: 's-cron', value: '0 * * * *' })),
-      h('div', {}, h('span', { className: 'f-label' }, '模型'), h('input', { id: 's-model', placeholder: '默认' })),
-    ),
-    h('button', { className: 'btn btn-primary', style: 'margin-top:10px;', onclick: addSub }, '添加')
-  ));
-
-  const presets = [['0 * * * *','每小时'],['0 */2 * * *','每2时'],['0 */6 * * *','每6时'],['0 9 * * *','早9点'],['0 9 * * 1-5','工作日'],['*/30 * * * *','30分']];
-  app.appendChild(h('div', { className: 'card' },
-    h('h3', {}, 'Cron 预设'),
-    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;' }, ...presets.map(([v, t]) =>
-      h('button', { className: 'btn btn-outline btn-sm', onclick: () => { document.getElementById('s-cron').value = v; } }, t)
-    ))
-  ));
-
-  const list = h('div', { className: 'card' }, h('h3', {}, '订阅列表 (' + st.subs.length + ')'));
+  // Header with add button
+  const hdr = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;' });
+  hdr.appendChild(h('h3', { style: 'margin:0;font-size:13px;font-weight:600;' }, '订阅列表 (' + st.subs.length + ')'));
+  hdr.appendChild(h('button', { className: 'btn btn-primary btn-sm', onclick: showAddSub }, '+ 添加订阅'));
+  const list = h('div', { className: 'card' }, hdr);
   if (!st.subs.length) {
     list.appendChild(h('div', { className: 'empty' }, '暂无订阅'));
   } else {
@@ -200,6 +182,7 @@ function subscriptions(app) {
     st.subs.forEach((s, i) => {
       const tr = h('tr', { className: s.paused ? 'paused' : '' });
       tr.innerHTML = '<td><b>' + (s.paused ? '[停] ' : '') + esc(s.title) + '</b><br><span style="font-size:11px;color:var(--muted)">' + esc(s.url || '').substring(0, 55) + '</span></td>' +
+        '<td><span style="font-size:11px;color:var(--muted)">' + esc(s.user || '') + '</span></td>' +
         '<td><code style="font-size:12px">' + esc(s.cron) + '</code></td>' +
         '<td>' + (s.renderer ? '<span class="tag tag-green">' + esc(s.renderer) + '</span>' : '<span class="tag tag-gray">默认</span>') + '</td>';
       const act = h('td', { className: 'act-cell' });
@@ -211,19 +194,11 @@ function subscriptions(app) {
       tbody.appendChild(tr);
     });
     const tbl = h('table');
-    tbl.innerHTML = '<thead><tr><th>频道</th><th>Cron</th><th>模型</th><th style="width:170px">操作</th></tr></thead>';
+    tbl.innerHTML = '<thead><tr><th>频道</th><th>用户</th><th>Cron</th><th>模型</th><th style="width:170px">操作</th></tr></thead>';
     tbl.appendChild(tbody);
     list.appendChild(tbl);
   }
   app.appendChild(list);
-
-  document.getElementById('s-url').parentElement.style.display = 'none';
-  document.getElementById('s-type').onchange = function () {
-    const is = this.value === 'rsshub';
-    document.getElementById('s-url').parentElement.style.display = is ? 'none' : 'block';
-    document.getElementById('s-route').parentElement.style.display = is ? 'block' : 'none';
-    document.getElementById('s-ep').parentElement.style.display = is ? 'block' : 'none';
-  };
 }
 
 /* ═══════════════════════ 端点 ═══════════════════════ */
@@ -339,25 +314,58 @@ function logs(app) {
 
 /* ═══════════════════════ Actions ═══════════════════════ */
 
+function showAddSub() {
+  var epsOpts = st.eps.map(function(e, i) { return '<option value="' + i + '">' + esc(e.url) + '</option>'; }).join('');
+  var body =
+    '<div style="margin-bottom:10px;"><label class="f-label">方式</label><select id="ad-type" style="width:100%"><option value="rsshub">RSSHub</option><option value="url">直连 URL</option></select></div>' +
+    '<div id="ad-ep-wrap" style="margin-bottom:10px;"><label class="f-label">端点</label><select id="ad-ep" style="width:100%">' + epsOpts + '</select></div>' +
+    '<div id="ad-route-wrap" style="margin-bottom:10px;"><label class="f-label">路由</label><input id="ad-route" placeholder="/twitter/user/xxx" /></div>' +
+    '<div id="ad-url-wrap" style="margin-bottom:10px;display:none"><label class="f-label">URL</label><input id="ad-url" placeholder="https://..." /></div>' +
+    '<div style="margin-bottom:10px;"><label class="f-label">用户 / 群聊</label><input id="ad-user" placeholder="aiocqhttp:群号:QQ号" /></div>' +
+    '<div style="margin-bottom:10px;"><label class="f-label">Cron</label><input id="ad-cron" value="0 * * * *" /><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' +
+      ['0 * * * *','0 */2 * * *','0 */6 * * *','0 9 * * *','0 9 * * 1-5','*/30 * * * *'].map(function(v) {
+        return '<button class="btn btn-outline btn-sm" onclick="document.getElementById(\'ad-cron\').value=\'' + v + '\'" type="button">' + v + '</button>';
+      }).join('') +
+    '</div></div>' +
+    '<div style="margin-bottom:10px;"><label class="f-label">模型</label><input id="ad-model" placeholder="默认" /></div>';
+  modal('添加订阅', body, [
+    { label: '取消' },
+    { label: '添加', primary: true, cb: function () {
+      var type = document.getElementById('ad-type').value;
+      var user = document.getElementById('ad-user').value;
+      var cron = document.getElementById('ad-cron').value;
+      var model = document.getElementById('ad-model').value || undefined;
+      if (!user) { toast('请输入用户/群聊', true); return; }
+      var req;
+      if (type === 'rsshub') {
+        var ep = parseInt(document.getElementById('ad-ep').value);
+        var route = document.getElementById('ad-route').value;
+        if (!route) { toast('请输入路由', true); return; }
+        req = $.post('subscriptions/rsshub', { user: user, endpoint_idx: ep, route: route, cron: cron });
+      } else {
+        var url = document.getElementById('ad-url').value;
+        if (!url) { toast('请输入 URL', true); return; }
+        req = $.post('subscriptions/url', { user: user, url: url, cron: cron, renderer: model });
+      }
+      req.then(function () { toast('添加成功'); load(); }).catch(function (e) { toast('添加失败: ' + e, true); });
+    }}
+  ]);
+  // Toggle RSSHub/URL fields
+  setTimeout(function () {
+    var typeSel = document.getElementById('ad-type');
+    var toggle = function () {
+      var is = typeSel.value === 'rsshub';
+      document.getElementById('ad-ep-wrap').style.display = is ? 'block' : 'none';
+      document.getElementById('ad-route-wrap').style.display = is ? 'block' : 'none';
+      document.getElementById('ad-url-wrap').style.display = is ? 'block' : 'none';
+    };
+    typeSel.onchange = toggle;
+    toggle();
+  }, 50);
+}
+
 async function addSub() {
-  const type = document.getElementById('s-type').value;
-  const user = document.getElementById('s-user').value;
-  const cron = document.getElementById('s-cron').value;
-  const model = document.getElementById('s-model').value || undefined;
-  if (!user) return toast('请输入用户标识', true);
-  try {
-    if (type === 'rsshub') {
-      const ep = parseInt(document.getElementById('s-ep').value);
-      const route = document.getElementById('s-route').value;
-      if (!route) return toast('请输入路由', true);
-      await $.post('subscriptions/rsshub', { user, endpoint_idx: ep, route, cron });
-    } else {
-      const url = document.getElementById('s-url').value;
-      if (!url) return toast('请输入 URL', true);
-      await $.post('subscriptions/url', { user, url, cron, renderer: model });
-    }
-    toast('添加成功'); await load();
-  } catch (e) { toast('添加失败: ' + e, true); }
+  // Legacy — no longer used directly since form is now in modal
 }
 
 function addEp() {
@@ -397,14 +405,17 @@ function fetchItems(idx) {
 }
 
 function editSub(idx, s) {
-  const body = '<div style="margin-bottom:12px;"><label class="f-label">Cron 表达式</label><input id="ed-cron" value="' + esc(s.cron) + '" /></div>' +
+  const body = '<div style="margin-bottom:12px;"><label class="f-label">用户 / 群聊</label><input id="ed-user" value="' + esc(s.user || '') + '" /></div>' +
+    '<div style="margin-bottom:12px;"><label class="f-label">Cron 表达式</label><input id="ed-cron" value="' + esc(s.cron) + '" /></div>' +
     '<div style="margin-bottom:12px;"><label class="f-label">模型</label><input id="ed-model" value="' + esc(s.renderer || '') + '" placeholder="留空=默认" /></div>';
   modal('编辑订阅', body, [
     { label: '取消' },
     { label: '保存', primary: true, cb: function () {
+      const newUser = document.getElementById('ed-user').value;
       const cron = document.getElementById('ed-cron').value;
       const model = document.getElementById('ed-model').value;
-      const p = { cron, user: '', idx };
+      const p = { cron, user: s.user || '', idx };
+      if (newUser && newUser !== s.user) p.new_user = newUser;
       if (model === ' ') p.renderer = ''; else if (model) p.renderer = model;
       $.post('subscriptions/update', p).then(() => { toast('已更新'); load(); }).catch(e => toast('更新失败: ' + e, true));
     }},
