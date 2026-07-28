@@ -370,6 +370,8 @@ class RssPlugin(Star):
 
     @rsshub.command("add")
     async def rsshub_add(self, event: AstrMessageEvent, url: str = None):
+        """添加 RSSHub 端点"""
+        """添加 RSSHub 端点"""
         if url is None:
             self._wizards[event.unified_msg_origin] = {"step": "ep_add_url"}
             yield event.plain_result("🔗 输入 RSSHub 端点 URL:")
@@ -390,6 +392,8 @@ class RssPlugin(Star):
 
     @rsshub.command("list")
     async def rsshub_list(self, event: AstrMessageEvent):
+        """列出所有 RSSHub 端点"""
+        """列出所有 RSSHub 端点"""
         ret = "当前Bot添加的rsshub endpoint：\n"
         yield event.plain_result(
             ret
@@ -403,6 +407,8 @@ class RssPlugin(Star):
 
     @rsshub.command("remove")
     async def rsshub_remove(self, event: AstrMessageEvent, idx: int = None):
+        """删除 RSSHub 端点"""
+        """删除 RSSHub 端点"""
         eps = self.data_handler.data.get("rsshub_endpoints", [])
         if idx is None:
             if not eps:
@@ -691,6 +697,7 @@ class RssPlugin(Star):
 
     @filter.command("")
     async def _wizard_handler(self, event: AstrMessageEvent):
+        """[内部] 处理交互式向导消息"""
         """全局消息监听 — 处理交互式向导输入"""
         user = event.unified_msg_origin
         if user not in self._wizards:
@@ -706,6 +713,8 @@ class RssPlugin(Star):
         month: str = None, day_of_week: str = None,
         renderer: str = None,
     ):
+        """通过 RSSHub 路由添加订阅（无参数进入引导）"""
+        """通过 RSSHub 路由添加订阅（无参数进入引导）"""
         # 在向导中？路由到向导处理
         if event.unified_msg_origin in self._wizards:
             async for result in self._handle_wizard(event):
@@ -765,6 +774,7 @@ class RssPlugin(Star):
         month: str = None, day_of_week: str = None,
         renderer: str = None,
     ):
+        """通过直连 URL 添加订阅（无参数进入引导）"""
         if url is None:
             self._wizards[event.unified_msg_origin] = {"step": "url", "cmd": "add-url"}
             yield event.plain_result("🔗 输入 RSS Feed URL:\n── 也可以直接 /rss add-url <url> <Cron> [模型] 快速订阅")
@@ -786,6 +796,7 @@ class RssPlugin(Star):
 
     @rss.command("list")
     async def list_command(self, event: AstrMessageEvent):
+        """列出当前会话所有订阅"""
         user = event.unified_msg_origin
         subs_urls = self.data_handler.get_subs_channel_url(user)
         if not subs_urls:
@@ -806,6 +817,7 @@ class RssPlugin(Star):
 
     @rss.command("remove")
     async def remove_command(self, event: AstrMessageEvent, idx: int = None):
+        """删除指定订阅（无参数进入引导）"""
         user = event.unified_msg_origin
         subs_urls = self.data_handler.get_subs_channel_url(user)
         if idx is None:
@@ -836,6 +848,7 @@ class RssPlugin(Star):
 
     @rss.command("stats")
     async def stats_command(self, event: AstrMessageEvent):
+        """查看订阅/推送统计"""
         """查看插件统计信息"""
         data = self.data_handler.data
         feeds = {k: v for k, v in data.items()
@@ -867,6 +880,7 @@ class RssPlugin(Star):
     @rss.command("pause")
     async def pause_command(self, event: AstrMessageEvent, idx: int = None):
         """暂停订阅（停止推送但不删除）"""
+        """暂停订阅（停止推送但不删除）"""
         user = event.unified_msg_origin
         subs_urls = self.data_handler.get_subs_channel_url(user)
         if idx is None:
@@ -890,6 +904,7 @@ class RssPlugin(Star):
 
     @rss.command("resume")
     async def resume_command(self, event: AstrMessageEvent, idx: int = None):
+        """恢复已暂停的订阅"""
         """恢复订阅"""
         user = event.unified_msg_origin
         subs_urls = self.data_handler.get_subs_channel_url(user)
@@ -921,6 +936,7 @@ class RssPlugin(Star):
         month: str = None, day_of_week: str = None,
         renderer: str = None,
     ):
+        """修改订阅的 Cron 周期或模型（无参数进入引导）"""
         user = event.unified_msg_origin
         if idx is None:
             subs = self.data_handler.get_subs_channel_url(user)
@@ -965,6 +981,7 @@ class RssPlugin(Star):
 
     @rss.command("get")
     async def get_command(self, event: AstrMessageEvent, idx: int = None):
+        """手动拉取指定订阅的最新条目"""
         user = event.unified_msg_origin
         subs_urls = self.data_handler.get_subs_channel_url(user)
         if idx is None:
@@ -1000,6 +1017,7 @@ class RssPlugin(Star):
 
     @rss.command("history")
     async def history_command(self, event: AstrMessageEvent, count: int = 10):
+        """查看最近推送历史记录"""
         from datetime import datetime, timezone, timedelta
         history = self.data_handler.data.get("_push_history", [])
         if not history:
@@ -1016,6 +1034,7 @@ class RssPlugin(Star):
 
     @rss.command("test")
     async def test_command(self, event: AstrMessageEvent, url: str = None):
+        """预览 RSS Feed 内容（无需订阅）"""
         if url is None:
             self._wizards[event.unified_msg_origin] = {"step": "test_url"}
             yield event.plain_result("🔗 输入要预览的 RSS Feed URL:")
@@ -1053,6 +1072,7 @@ class RssPlugin(Star):
 
     @rss.command("cron")
     async def cron_command(self, event: AstrMessageEvent, arg: str = ""):
+        """Cron 表达式帮助（无参列快捷词，有参解释含义）"""
         """Cron 帮助：无参列快捷词，有参解释表达式含义"""
         arg = arg.strip()
         if not arg:
