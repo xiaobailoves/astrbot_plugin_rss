@@ -63,6 +63,8 @@ class RssPlugin(Star):
 
         self.logger = logging.getLogger("astrbot")
         self.log_handler = MemoryLogHandler()
+        # 交互式订阅向导状态
+        self._wizards: dict[str, dict] = {}
         self.logger.addHandler(self.log_handler)
         self.context = context
         self.config = config
@@ -74,6 +76,7 @@ class RssPlugin(Star):
         self.max_items_per_poll = config.get("max_items_per_poll", 3)
         self.t2i = config.get("t2i")
         self.is_hide_url = config.get("is_hide_url")
+        self.max_consecutive_failures = config.get("max_consecutive_failures", 100)
         self.is_compose = config.get("compose")
         self.proxy = config.get("proxy", None)
         self.verify_ssl = config.get("verify_ssl", True)
@@ -164,6 +167,7 @@ class RssPlugin(Star):
             is_compose=self.is_compose,
             t2i=self.t2i,
             max_items_per_poll=self.max_items_per_poll,
+            max_consecutive_failures=self.max_consecutive_failures,
         )
 
         # ── 热重载资源清理 ────────────────────────────────
@@ -365,7 +369,11 @@ class RssPlugin(Star):
         pass
 
     @rsshub.command("add")
-    async def rsshub_add(self, event: AstrMessageEvent, url: str):
+    async def rsshub_add(self, event: AstrMessageEvent, url: str = None):
+        if url is None:
+            self._wizards[event.unified_msg_origin] = {"step": "ep_add_url"}
+            yield event.plain_result("🔗 输入 RSSHub 端点 URL:")
+            return
         if url.endswith("/"):
             url = url[:-1]
         url = self.parse_rss_url(url)
@@ -394,8 +402,19 @@ class RssPlugin(Star):
         )
 
     @rsshub.command("remove")
-    async def rsshub_remove(self, event: AstrMessageEvent, idx: int):
-        if idx < 0 or idx >= len(self.data_handler.data["rsshub_endpoints"]):
+    async def rsshub_remove(self, event: AstrMessageEvent, idx: int = None):
+        eps = self.data_handler.data.get("rsshub_endpoints", [])
+        if idx is None:
+            if not eps:
+                yield event.plain_result("暂无端点")
+                return
+            lines = ["🔗 选择要删除的端点（输入序号）:"]
+            for i, u in enumerate(eps):
+                lines.append(f"  {i}. {u}")
+            yield event.plain_result("\n".join(lines))
+            self._wizards[event.unified_msg_origin] = {"step": "ep_rm_pick"}
+            return
+        if idx < 0 or idx >= len(eps):
             yield event.plain_result("索引越界")
             return
         else:
@@ -408,20 +427,313 @@ class RssPlugin(Star):
     #  Commands: Subscriptions
     # ═══════════════════════════════════════════════════════════
 
+    async def _handle_wizard(self, event: AstrMessageEvent):
+        """处理交互式向导的消息（add / add-url / update）"""
+        user = event.unified_msg_origin
+        w = self._wizards.get(user)
+        if not w:
+            return
+        text = event.message_str.strip()
+
+        # ── 共享步骤: cron ──
+        if w["step"] == "cron":
+            try:
+                cron = self.normalize_cron(text)
+            except ValueError as e:
+                yield event.plain_result(f"格式错误: {e}\n请重新输入:")
+                return
+            w["cron"] = cron
+            w["step"] = "model"
+            yield event.plain_result("🎨 输入模型 (默认/twitter/compose，直接回车跳过):")
+            return
+
+        # ── 共享步骤: model ──
+        if w["step"] == "model":
+            model = text.strip() if text.strip() else None
+            cmd = w.get("cmd", "add")
+            if cmd == "add-url":
+                url = self.fetcher.normalize_url(w["url"])
+                ret = await self._add_url(url, w["cron"], event, model)
+                if isinstance(ret, MessageEventResult):
+                    yield ret
+                else:
+                    self._add_single_job(url, user, w["cron"])
+                    yield event.plain_result(
+                        f"✅ 添加成功！\n频道: {ret['title']}\n周期: `{w['cron']}`\n模型: {model or '默认'}"
+                    )
+            elif cmd == "update":
+                idx = w["idx"]
+                subs = self.data_handler.get_subs_channel_url(user)
+                url = subs[idx]
+                sub = self.data_handler.data[url]["subscribers"][user]
+                sub["cron_expr"] = w["cron"]
+                if model:
+                    sub["renderer"] = model
+                elif "renderer" in sub:
+                    del sub["renderer"]
+                await self.data_handler.save_data()
+                self._remove_single_job(url, user)
+                self._add_single_job(url, user, w["cron"])
+                yield event.plain_result(
+                    f"✅ 更新成功！\n频道: {self.data_handler.data[url]['info']['title']}\n周期: `{w['cron']}`"
+                )
+            else:  # add (rsshub)
+                url = self.data_handler.data["rsshub_endpoints"][w["idx"]] + w["route"]
+                ret = await self._add_url(url, w["cron"], event, model)
+                if isinstance(ret, MessageEventResult):
+                    yield ret
+                else:
+                    self._add_single_job(url, user, w["cron"])
+                    yield event.plain_result(
+                        f"✅ 添加成功！\n频道: {ret['title']}\n周期: `{w['cron']}`\n模型: {model or '默认'}"
+                    )
+            del self._wizards[user]
+            return
+
+        # ── add/rsshub 专有: idx → route ──
+        if w["step"] == "idx":
+            try:
+                i = int(text)
+            except ValueError:
+                yield event.plain_result("请输入数字序号")
+                return
+            eps = self.data_handler.data.get("rsshub_endpoints", [])
+            if i < 0 or i >= len(eps):
+                yield event.plain_result("序号超出范围")
+                return
+            w["idx"] = i
+            w["step"] = "route"
+            yield event.plain_result("🔗 输入路由 (如 /twitter/user/xxx):")
+            return
+
+        if w["step"] == "route":
+            if not text.startswith("/"):
+                yield event.plain_result("路由必须以 / 开头，请重新输入:")
+                return
+            w["route"] = text
+            w["step"] = "cron"
+            yield event.plain_result("⏱ 输入 Cron 表达式 (如 0 * * * *，快捷词如 每小时):")
+            return
+
+        # ── add-url 专有: url ──
+        if w["step"] == "url":
+            if not text:
+                yield event.plain_result("URL 不能为空，请重新输入:")
+                return
+            w["url"] = text
+            w["step"] = "cron"
+            yield event.plain_result("⏱ 输入 Cron 表达式 (如 0 * * * *，快捷词如 每小时):")
+            return
+
+        # ── update 专有: 选订阅 ──
+        if w["step"] == "pick":
+            try:
+                i = int(text)
+            except ValueError:
+                yield event.plain_result("请输入数字序号")
+                return
+            subs = self.data_handler.get_subs_channel_url(user)
+            if i < 0 or i >= len(subs):
+                yield event.plain_result("序号超出范围")
+                return
+            w["idx"] = i
+            w["step"] = "cron"
+            yield event.plain_result("⏱ 输入新 Cron 表达式 (如 0 * * * *，快捷词如 每小时):")
+            return
+
+        # ── remove 专有: 选 → 确认 ──
+        if w["step"] == "rm_pick":
+            try:
+                i = int(text)
+            except ValueError:
+                yield event.plain_result("请输入数字序号")
+                return
+            subs = self.data_handler.get_subs_channel_url(user)
+            if i < 0 or i >= len(subs):
+                yield event.plain_result("序号超出范围")
+                return
+            w["idx"] = i
+            w["step"] = "rm_confirm"
+            title = self.data_handler.data[subs[i]]["info"]["title"]
+            yield event.plain_result(f"确定删除【{title}】？(y/n)")
+            return
+
+        if w["step"] == "rm_confirm":
+            if text.lower() in ("y", "yes", "是"):
+                idx = w["idx"]
+                subs = self.data_handler.get_subs_channel_url(user)
+                url = subs[idx]
+                self.data_handler.data[url]["subscribers"].pop(user, None)
+                if not self.data_handler.data[url]["subscribers"]:
+                    self.data_handler.data.pop(url)
+                self._remove_single_job(url, user)
+                await self.data_handler.save_data()
+                yield event.plain_result("✅ 已删除")
+            else:
+                yield event.plain_result("已取消")
+            del self._wizards[user]
+            return
+
+        # ── get 专有: 选 → 展示 ──
+        if w["step"] == "get_pick":
+            try:
+                i = int(text)
+            except ValueError:
+                yield event.plain_result("请输入数字序号")
+                return
+            subs = self.data_handler.get_subs_channel_url(user)
+            if i < 0 or i >= len(subs):
+                yield event.plain_result("序号超出范围")
+                return
+            url = subs[i]
+            async with self.fetcher.get_lock(url):
+                items = await self.fetcher.poll(url)
+            if not items:
+                yield event.plain_result("📭 暂无内容")
+            else:
+                item = items[-1]
+                comps = await self.builder.build_chain(item)
+                yield event.chain_result(comps).use_t2i(self.t2i)
+            del self._wizards[user]
+            return
+
+        # ── pause 专有: 选 → 暂停 ──
+        if w["step"] == "pause_pick":
+            try:
+                i = int(text)
+            except ValueError:
+                yield event.plain_result("请输入数字序号")
+                return
+            subs = self.data_handler.get_subs_channel_url(user)
+            if i < 0 or i >= len(subs):
+                yield event.plain_result("序号超出范围")
+                return
+            url = subs[i]
+            self.data_handler.data[url]["subscribers"][user]["paused"] = True
+            await self.data_handler.save_data()
+            title = self.data_handler.data[url]["info"]["title"]
+            yield event.plain_result(f"⏸️ 已暂停: {title}")
+            del self._wizards[user]
+            return
+
+        # ── resume 专有: 选已暂停 → 恢复 ──
+        if w["step"] == "resume_pick":
+            try:
+                i = int(text)
+            except ValueError:
+                yield event.plain_result("请输入数字序号")
+                return
+            subs = self.data_handler.get_subs_channel_url(user)
+            paused = [(j, u) for j, u in enumerate(subs)
+                      if self.data_handler.data[u]["subscribers"][user].get("paused")]
+            if i < 0 or i >= len(paused):
+                yield event.plain_result("序号超出范围")
+                return
+            _, url = paused[i]
+            self.data_handler.data[url]["subscribers"][user]["paused"] = False
+            await self.data_handler.save_data()
+            title = self.data_handler.data[url]["info"]["title"]
+            yield event.plain_result(f"▶️ 已恢复: {title}")
+            del self._wizards[user]
+            return
+
+        # ── test 专有: 输入 URL → 预览 ──
+        if w["step"] == "test_url":
+            url = self.fetcher.normalize_url(text)
+            yield event.plain_result(f"🔍 正在获取 {url} ...")
+            try:
+                raw = await self.fetcher.fetch(url)
+                if raw is None:
+                    yield event.plain_result("❌ 无法访问该 Feed")
+                else:
+                    title, desc = self.data_handler.parse_channel_text_info(raw)
+                    items = await self.fetcher.poll(url, num=3, raw_text=raw)
+                    lines = [f"📰 {title}", f"📝 {desc[:200]}", f"━━ 预览最新 {len(items)} 条 ━━"]
+                    for item in items:
+                        t = self.builder.format_time(item)
+                        time_str = f"  [{t}] " if t else "  "
+                        lines.append(f"{time_str}📌 {item.title[:60]}")
+                    yield event.plain_result("\n".join(lines))
+            except Exception as e:
+                yield event.plain_result(f"❌ 解析失败: {e}")
+            del self._wizards[user]
+            return
+
+        # ── rsshub add 专有: 输入 URL → 添加 ──
+        if w["step"] == "ep_add_url":
+            url = self.fetcher.normalize_url(text)
+            if url in self.data_handler.data.get("rsshub_endpoints", []):
+                yield event.plain_result("该端点已存在")
+            else:
+                self.data_handler.data["rsshub_endpoints"].append(url)
+                await self.data_handler.save_data()
+                yield event.plain_result(f"✅ 已添加: {url}")
+            del self._wizards[user]
+            return
+
+        # ── rsshub remove 专有: 选端点 → 删 ──
+        if w["step"] == "ep_rm_pick":
+            try:
+                i = int(text)
+            except ValueError:
+                yield event.plain_result("请输入数字序号")
+                return
+            eps = self.data_handler.data.get("rsshub_endpoints", [])
+            if i < 0 or i >= len(eps):
+                yield event.plain_result("序号超出范围")
+                return
+            eps.pop(i)
+            await self.data_handler.save_data()
+            self._fresh_asyncIOScheduler()
+            yield event.plain_result("✅ 端点已删除")
+            del self._wizards[user]
+            return
+
+    @filter.command("")
+    async def _wizard_handler(self, event: AstrMessageEvent):
+        """全局消息监听 — 处理交互式向导输入"""
+        user = event.unified_msg_origin
+        if user not in self._wizards:
+            return  # 不在向导中，忽略
+        async for result in self._handle_wizard(event):
+            yield result
+
     @rss.command("add")
     async def add_command(
         self, event: AstrMessageEvent,
-        idx: int, route: str,
-        minute: str, hour: str, day: str, month: str, day_of_week: str,
+        idx: int = None, route: str = None,
+        minute: str = None, hour: str = None, day: str = None,
+        month: str = None, day_of_week: str = None,
         renderer: str = None,
     ):
-        if idx < 0 or idx >= len(self.data_handler.data["rsshub_endpoints"]):
-            yield event.plain_result(
-                "索引越界, 请使用 /rss rsshub list 查看已经添加的 rsshub endpoint"
-            )
+        # 在向导中？路由到向导处理
+        if event.unified_msg_origin in self._wizards:
+            async for result in self._handle_wizard(event):
+                yield result
             return
-        if not route.startswith("/"):
+
+        # 无参数 → 启动交互式向导
+        if idx is None:
+            eps = self.data_handler.data.get("rsshub_endpoints", [])
+            if not eps:
+                yield event.plain_result("请先添加 RSSHub 端点: /rss rsshub add <url>")
+                return
+            lines = ["📡 选择一个 RSSHub 端点（输入序号）:"]
+            for i, u in enumerate(eps):
+                lines.append(f"  {i}. {u}")
+            lines.append("── 也可以直接 /rss add <序号> <路由> <Cron> [模型] 快速订阅")
+            yield event.plain_result("\n".join(lines))
+            self._wizards[event.unified_msg_origin] = {"step": "idx", "type": "rsshub"}
+            return
+
+        if idx < 0 or idx >= len(self.data_handler.data["rsshub_endpoints"]):
+            yield event.plain_result("索引越界")
+            return
+        if not route or not route.startswith("/"):
             yield event.plain_result("路由必须以 / 开头")
+            return
+        if not minute:
+            yield event.plain_result("缺少 Cron 参数")
             return
 
         url = self.data_handler.data["rsshub_endpoints"][idx] + route
@@ -448,10 +760,15 @@ class RssPlugin(Star):
     @rss.command("add-url")
     async def add_url_command(
         self, event: AstrMessageEvent,
-        url: str,
-        minute: str, hour: str, day: str, month: str, day_of_week: str,
+        url: str = None,
+        minute: str = None, hour: str = None, day: str = None,
+        month: str = None, day_of_week: str = None,
         renderer: str = None,
     ):
+        if url is None:
+            self._wizards[event.unified_msg_origin] = {"step": "url", "cmd": "add-url"}
+            yield event.plain_result("🔗 输入 RSS Feed URL:\n── 也可以直接 /rss add-url <url> <Cron> [模型] 快速订阅")
+            return
         url = self.parse_rss_url(url)
         cron_expr = f"{minute} {hour} {day} {month} {day_of_week}"
         ret = await self._add_url(url, cron_expr, event, renderer)
@@ -488,8 +805,19 @@ class RssPlugin(Star):
         yield event.plain_result(ret.strip())
 
     @rss.command("remove")
-    async def remove_command(self, event: AstrMessageEvent, idx: int):
-        subs_urls = self.data_handler.get_subs_channel_url(event.unified_msg_origin)
+    async def remove_command(self, event: AstrMessageEvent, idx: int = None):
+        user = event.unified_msg_origin
+        subs_urls = self.data_handler.get_subs_channel_url(user)
+        if idx is None:
+            if not subs_urls:
+                yield event.plain_result("当前没有任何订阅")
+                return
+            lines = ["🗑 选择要删除的订阅（输入序号）:"]
+            for i, url in enumerate(subs_urls):
+                lines.append(f"  {i}. {self.data_handler.data[url]['info']['title']}")
+            yield event.plain_result("\n".join(lines))
+            self._wizards[user] = {"step": "rm_pick"}
+            return
         if idx < 0 or idx >= len(subs_urls):
             yield event.plain_result("索引越界, 请使用 /rss list 查看已经添加的订阅")
             return
@@ -537,9 +865,20 @@ class RssPlugin(Star):
         yield event.plain_result("\n".join(lines))
 
     @rss.command("pause")
-    async def pause_command(self, event: AstrMessageEvent, idx: int):
+    async def pause_command(self, event: AstrMessageEvent, idx: int = None):
         """暂停订阅（停止推送但不删除）"""
-        subs_urls = self.data_handler.get_subs_channel_url(event.unified_msg_origin)
+        user = event.unified_msg_origin
+        subs_urls = self.data_handler.get_subs_channel_url(user)
+        if idx is None:
+            if not subs_urls:
+                yield event.plain_result("当前没有任何订阅")
+                return
+            lines = ["⏸ 选择要暂停的订阅（输入序号）:"]
+            for i, url in enumerate(subs_urls):
+                lines.append(f"  {i}. {self.data_handler.data[url]['info']['title']}")
+            yield event.plain_result("\n".join(lines))
+            self._wizards[user] = {"step": "pause_pick"}
+            return
         if idx < 0 or idx >= len(subs_urls):
             yield event.plain_result("索引越界")
             return
@@ -550,9 +889,22 @@ class RssPlugin(Star):
         yield event.plain_result(f"⏸️ 已暂停: {title}")
 
     @rss.command("resume")
-    async def resume_command(self, event: AstrMessageEvent, idx: int):
+    async def resume_command(self, event: AstrMessageEvent, idx: int = None):
         """恢复订阅"""
-        subs_urls = self.data_handler.get_subs_channel_url(event.unified_msg_origin)
+        user = event.unified_msg_origin
+        subs_urls = self.data_handler.get_subs_channel_url(user)
+        if idx is None:
+            paused = [(j, u) for j, u in enumerate(subs_urls)
+                      if self.data_handler.data[u]["subscribers"][user].get("paused")]
+            if not paused:
+                yield event.plain_result("没有已暂停的订阅")
+                return
+            lines = ["▶️ 选择要恢复的订阅（输入序号）:"]
+            for j, (_, url) in enumerate(paused):
+                lines.append(f"  {j}. {self.data_handler.data[url]['info']['title']}")
+            yield event.plain_result("\n".join(lines))
+            self._wizards[user] = {"step": "resume_pick"}
+            return
         if idx < 0 or idx >= len(subs_urls):
             yield event.plain_result("索引越界")
             return
@@ -564,14 +916,31 @@ class RssPlugin(Star):
 
     @rss.command("update")
     async def update_command(
-        self, event: AstrMessageEvent, idx: int,
-        minute: str, hour: str, day: str, month: str, day_of_week: str,
+        self, event: AstrMessageEvent, idx: int = None,
+        minute: str = None, hour: str = None, day: str = None,
+        month: str = None, day_of_week: str = None,
         renderer: str = None,
     ):
         user = event.unified_msg_origin
+        if idx is None:
+            subs = self.data_handler.get_subs_channel_url(user)
+            if not subs:
+                yield event.plain_result("当前没有任何订阅")
+                return
+            lines = ["📋 选择要修改的订阅（输入序号）:"]
+            for i, url in enumerate(subs):
+                info = self.data_handler.data[url]["info"]
+                lines.append(f"  {i}. {info['title']}")
+            lines.append("── 也可以直接 /rss update <序号> <Cron> [模型] 快速修改")
+            yield event.plain_result("\n".join(lines))
+            self._wizards[user] = {"step": "pick", "cmd": "update"}
+            return
         subs_urls = self.data_handler.get_subs_channel_url(user)
         if idx < 0 or idx >= len(subs_urls):
             yield event.plain_result("索引错误。")
+            return
+        if not minute:
+            yield event.plain_result("缺少 Cron 参数")
             return
         url = subs_urls[idx]
         new_cron = f"{minute} {hour} {day} {month} {day_of_week}"
@@ -595,8 +964,19 @@ class RssPlugin(Star):
         yield event.plain_result(info)
 
     @rss.command("get")
-    async def get_command(self, event: AstrMessageEvent, idx: int):
-        subs_urls = self.data_handler.get_subs_channel_url(event.unified_msg_origin)
+    async def get_command(self, event: AstrMessageEvent, idx: int = None):
+        user = event.unified_msg_origin
+        subs_urls = self.data_handler.get_subs_channel_url(user)
+        if idx is None:
+            if not subs_urls:
+                yield event.plain_result("当前没有任何订阅")
+                return
+            lines = ["📥 选择要查看的订阅（输入序号）:"]
+            for i, url in enumerate(subs_urls):
+                lines.append(f"  {i}. {self.data_handler.data[url]['info']['title']}")
+            yield event.plain_result("\n".join(lines))
+            self._wizards[user] = {"step": "get_pick"}
+            return
         if idx < 0 or idx >= len(subs_urls):
             yield event.plain_result("索引越界, 请使用 /rss list 查看已经添加的订阅")
             return
@@ -635,7 +1015,11 @@ class RssPlugin(Star):
         yield event.plain_result("\n".join(lines))
 
     @rss.command("test")
-    async def test_command(self, event: AstrMessageEvent, url: str):
+    async def test_command(self, event: AstrMessageEvent, url: str = None):
+        if url is None:
+            self._wizards[event.unified_msg_origin] = {"step": "test_url"}
+            yield event.plain_result("🔗 输入要预览的 RSS Feed URL:")
+            return
         url = self.parse_rss_url(url)
         yield event.plain_result(f"🔍 正在获取 {url} ...")
 

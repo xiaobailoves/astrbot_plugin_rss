@@ -255,6 +255,7 @@ function config(app) {
     t2i:                    ['文字转图片', '开启后图片内容会丢失'],
     is_hide_url:            ['隐藏链接', '推送中不显示原文链接'],
     verify_ssl:             ['验证 HTTPS 证书', '关闭可跳过证书错误'],
+    max_consecutive_failures: ['连续失败自动暂停', '失败此次数后自动暂停订阅，默认 100'],
   };
   const card = h('div', { className: 'card' }, h('h3', {}, '插件配置'));
   Object.entries(labels).forEach(([k, info]) => {

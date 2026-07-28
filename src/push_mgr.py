@@ -31,6 +31,7 @@ class PushManager:
         is_compose: bool = True,
         t2i: bool = False,
         max_items_per_poll: int = 3,
+        max_consecutive_failures: int = 100,
     ):
         self._context = context
         self._data_handler = data_handler
@@ -40,9 +41,25 @@ class PushManager:
         self._is_compose = is_compose
         self._t2i = t2i
         self._max_items_per_poll = max_items_per_poll
+        self._max_failures = max_consecutive_failures
         self._logger = logging.getLogger("astrbot")
 
     # ── Helpers ───────────────────────────────────────────
+
+    def _on_failure(self, data: dict, url: str, user: str, reason: str = ""):
+        """跟踪连续失败次数，超过阈值自动暂停"""
+        sub = data[url]["subscribers"][user]
+        count = sub.get("consecutive_failures", 0) + 1
+        sub["consecutive_failures"] = count
+        if count >= self._max_failures:
+            sub["paused"] = True
+            self._logger.warning(
+                f"🚫 RSS {url} - {user} 连续失败 {count} 次（原因: {reason}），已自动暂停"
+            )
+        else:
+            self._logger.debug(
+                f"⚠️ RSS {url} - {user} 连续失败 {count}/{self._max_failures} 次（原因: {reason}）"
+            )
 
     def _is_unrecoverable(self, error: Exception) -> bool:
         """判断是否为不可恢复的推送错误"""
@@ -173,6 +190,7 @@ class PushManager:
             )
             if not rss_items:
                 self._logger.info(f"😴 RSS {url} 无新内容 - {user}")
+                self._on_failure(data, url, user, "无新内容")
                 return
 
             # 指纹去重
@@ -200,12 +218,16 @@ class PushManager:
                     f"📄 使用渲染器: {renderer.name} ({url})"
                 )
             except Exception as e:
+                self._on_failure(data, url, user, str(e)[:80])
                 if self._is_unrecoverable(e):
                     self._logger.warning(f"🚫 不可恢复的推送错误，跳过重试: {e}")
                 else:
                     self._logger.error(f"❌ 推送失败: {e}")
                     for item in new_items:
                         self._queue_failed(user, url, item)
+
+            # 成功：重置失败计数
+            data[url]["subscribers"][user]["consecutive_failures"] = 0
 
             pushed_hashes = self._fetcher.cleanup_hashes(pushed_hashes)
             data[url]["subscribers"][user]["pushed_hashes"] = pushed_hashes

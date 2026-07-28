@@ -59,6 +59,15 @@
         "obvious_hint": true,
         "default": true
     },
+    "max_consecutive_failures": {
+        "description": "连续失败自动暂停阈值",
+        "type": "int",
+        "hint": "连续拉取/推送失败达到此次数后自动暂停订阅。默认 100。",
+        "obvious_hint": true,
+        "default": 100,
+        "minimum": 5,
+        "maximum": 1000
+    },
     "pic_config": {
         "description": "图片相关配置",
         "type": "object",
