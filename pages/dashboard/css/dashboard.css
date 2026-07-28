@@ -66,7 +66,7 @@ input:focus, select:focus { outline: none; border-color: var(--blue); box-shadow
 .btn-outline { background: var(--card); border-color: var(--border); color: var(--text); }
 .btn-outline:hover { background: #f3f4f6; }
 .btn-sm { padding: 4px 9px; font-size: 12px; }
-.btn-ghost { background: none; border: none; color: var(--sub); padding: 4px 7px; font-size: 12px; font-weight: 400; }
+.btn-ghost { background: none; border: none; color: var(--sub); padding: 10px 12px; font-size: 13px; font-weight: 400; }
 .btn-ghost:hover { background: #f3f4f6; color: var(--text); }
 .btn-ghost.danger { color: var(--red); }
 .btn-ghost.danger:hover { background: #fff1f0; }

@@ -170,31 +170,28 @@ function overview(app) {
 /* ═══════════════════════ 订阅 ═══════════════════════ */
 
 function subscriptions(app) {
-  // Header with add button
-  const hdr = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;' });
+  var hdr = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;' });
   hdr.appendChild(h('h3', { style: 'margin:0;font-size:13px;font-weight:600;' }, '订阅列表 (' + st.subs.length + ')'));
   hdr.appendChild(h('button', { className: 'btn btn-primary btn-sm', onclick: showAddSub }, '+ 添加订阅'));
-  const list = h('div', { className: 'card' }, hdr);
+  var list = h('div', { className: 'card' }, hdr);
   if (!st.subs.length) {
     list.appendChild(h('div', { className: 'empty' }, '暂无订阅'));
   } else {
-    const tbody = h('tbody');
-    st.subs.forEach((s, i) => {
-      const tr = h('tr', { className: s.paused ? 'paused' : '' });
-      tr.innerHTML = '<td><b>' + (s.paused ? '[停] ' : '') + esc(s.title) + '</b><br><span style="font-size:11px;color:var(--muted)">' + esc(s.url || '').substring(0, 55) + '</span></td>' +
-        '<td><span style="font-size:11px;color:var(--muted)">' + esc(s.user || '') + '</span></td>' +
-        '<td><code style="font-size:12px">' + esc(s.cron) + '</code></td>' +
-        '<td>' + (s.renderer ? '<span class="tag tag-green">' + esc(s.renderer) + '</span>' : '<span class="tag tag-gray">默认</span>') + '</td>';
-      const act = h('td', { className: 'act-cell' });
-      act.appendChild(h('button', { className: 'btn btn-ghost', onclick: () => fetchItems(i) }, '拉取'));
-      act.appendChild(h('button', { className: 'btn btn-ghost', onclick: () => togglePause(i, s) }, s.paused ? '恢复' : '暂停'));
-      act.appendChild(h('button', { className: 'btn btn-ghost', onclick: () => editSub(i, s) }, '编辑'));
-      act.appendChild(h('button', { className: 'btn btn-ghost danger', onclick: () => delSub(i, s) }, '删除'));
+    var tbody = h('tbody');
+    st.subs.forEach(function(s, i) {
+      var tr = h('tr', { className: s.paused ? 'paused' : '' });
+      tr.innerHTML = '<td style="overflow:hidden;text-overflow:ellipsis"><b>' + (s.paused ? '[停] ' : '') + esc(s.title) + '</b><br><span style="font-size:11px;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.url || '') + '</span></td>' +
+        '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted)">' + esc(s.user || '') + '</td>';
+      var act = h('td', { className: 'act-cell' });
+      act.appendChild(h('button', { className: 'btn btn-ghost', onclick: function() { fetchItems(i); } }, '拉取'));
+      act.appendChild(h('button', { className: 'btn btn-ghost', onclick: function() { togglePause(i, s); } }, s.paused ? '恢复' : '暂停'));
+      act.appendChild(h('button', { className: 'btn btn-ghost', onclick: function() { showDetail(i, s); } }, '详情'));
       tr.appendChild(act);
       tbody.appendChild(tr);
     });
-    const tbl = h('table');
-    tbl.innerHTML = '<thead><tr><th style="width:auto">频道</th><th style="width:1%;white-space:nowrap">用户</th><th style="width:1%;white-space:nowrap">Cron</th><th style="width:1%;white-space:nowrap">模型</th><th style="width:150px">操作</th></tr></thead>';
+    var tbl = h('table');
+    tbl.style.tableLayout = 'fixed';
+    tbl.innerHTML = '<thead><tr><th style="width:33.33%">频道</th><th style="width:33.33%">用户</th><th style="width:33.33%">操作</th></tr></thead>';
     tbl.appendChild(tbody);
     list.appendChild(tbl);
   }
@@ -327,7 +324,7 @@ function showAddSub() {
         return '<button class="btn btn-outline btn-sm" onclick="document.getElementById(\'ad-cron\').value=\'' + v + '\'" type="button">' + v + '</button>';
       }).join('') +
     '</div></div>' +
-    '<div style="margin-bottom:10px;"><label class="f-label">模型</label><input id="ad-model" placeholder="默认" /></div>';
+    '<div style="margin-bottom:10px;"><label class="f-label">模型</label><select id="ad-model" style="width:100%"><option value="">默认</option><option value="twitter">twitter</option><option value="compose">compose</option></select></div>';
   modal('添加订阅', body, [
     { label: '取消' },
     { label: '添加', primary: true, cb: function () {
@@ -404,10 +401,28 @@ function fetchItems(idx) {
   }).catch(e => toast('拉取失败: ' + e, true));
 }
 
+function showDetail(idx, s) {
+  var pausedTag = s.paused ? '<span class="tag" style="background:#fff7ed;color:#9a3412">已暂停</span>' : '<span class="tag tag-green">运行中</span>';
+  var body =
+    '<div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px;">' +
+      '<span style="color:var(--muted)">频道</span><b>' + esc(s.title) + '</b>' +
+      '<span style="color:var(--muted)">URL</span><span style="word-break:break-all;font-size:12px">' + esc(s.url || '') + '</span>' +
+      '<span style="color:var(--muted)">用户</span><code style="font-size:12px">' + esc(s.user || '') + '</code>' +
+      '<span style="color:var(--muted)">Cron</span><code style="font-size:12px">' + esc(s.cron) + '</code>' +
+      '<span style="color:var(--muted)">模型</span><span>' + (s.renderer ? '<span class="tag tag-green">' + esc(s.renderer) + '</span>' : '<span class="tag tag-gray">默认</span>') + '</span>' +
+      '<span style="color:var(--muted)">状态</span><span>' + pausedTag + '</span>' +
+    '</div>';
+  modal('订阅详情', body, [
+    { label: '编辑', primary: false, cb: function() { editSub(idx, s); } },
+    { label: '删除', primary: false, cb: function() { delSub(idx, s); } },
+    { label: '关闭', primary: true },
+  ]);
+}
+
 function editSub(idx, s) {
   const body = '<div style="margin-bottom:12px;"><label class="f-label">用户 / 群聊</label><input id="ed-user" value="' + esc(s.user || '') + '" /></div>' +
     '<div style="margin-bottom:12px;"><label class="f-label">Cron 表达式</label><input id="ed-cron" value="' + esc(s.cron) + '" /></div>' +
-    '<div style="margin-bottom:12px;"><label class="f-label">模型</label><input id="ed-model" value="' + esc(s.renderer || '') + '" placeholder="留空=默认" /></div>';
+    '<div style="margin-bottom:12px;"><label class="f-label">模型</label><select id="ed-model" style="width:100%"><option value=""' + (s.renderer ? '' : ' selected') + '>默认</option><option value="twitter"' + (s.renderer === 'twitter' ? ' selected' : '') + '>twitter</option><option value="compose"' + (s.renderer === 'compose' ? ' selected' : '') + '>compose</option></select></div>';
   modal('编辑订阅', body, [
     { label: '取消' },
     { label: '保存', primary: true, cb: function () {
