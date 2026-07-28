@@ -183,7 +183,7 @@ function subscriptions(app) {
       tr.innerHTML = '<td style="overflow:hidden;text-overflow:ellipsis"><b>' + (s.paused ? '[停] ' : '') + esc(s.title) + '</b><br><span style="font-size:11px;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.url || '') + '</span></td>' +
         '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted)">' + esc(s.user || '') + '</td>';
       var act = h('td', { className: 'act-cell' });
-      act.appendChild(h('button', { className: 'btn btn-ghost', onclick: function() { fetchItems(i); } }, '拉取'));
+      act.appendChild(h('button', { className: 'btn btn-ghost', onclick: function() { fetchItems(i, s); } }, '拉取'));
       act.appendChild(h('button', { className: 'btn btn-ghost', onclick: function() { togglePause(i, s); } }, s.paused ? '恢复' : '暂停'));
       act.appendChild(h('button', { className: 'btn btn-ghost', onclick: function() { showDetail(i, s); } }, '详情'));
       tr.appendChild(act);
@@ -388,8 +388,8 @@ function delEp(idx) {
   });
 }
 
-function fetchItems(idx) {
-  $.post('subscriptions/fetch', { user: s.user || '', idx }).then(r => {
+function fetchItems(idx, s) {
+  $.post('subscriptions/fetch', { user: s.user || '', idx: idx }).then(r => {
     const items = r.items || [];
     if (!items.length) return toast('暂无新内容');
     let html = '<div style="max-height:400px;overflow-y:auto;font-size:13px;">';
