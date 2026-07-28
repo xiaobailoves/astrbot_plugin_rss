@@ -1,7 +1,6 @@
 /* RSS Dashboard */
 
 const B = window.AstrBotPluginPage;
-if (!B) { document.body.innerHTML = '<div style="text-align:center;padding:80px 20px;color:#8b949e;font-size:15px;">请在 AstrBot 仪表盘中打开</div>'; throw new Error('Bridge missing'); }
 
 const $ = {
   get: (p, q) => B.apiGet(p, q || {}).then(r => (r.ok !== undefined ? (r.ok ? r : Promise.reject(r.error)) : r)),
@@ -435,6 +434,7 @@ function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.
 
 /* ── Init ── */
 (async () => {
+  if (!B) { document.body.innerHTML = '<div style="text-align:center;padding:80px 20px;color:#8b949e;font-size:15px;">请在 AstrBot 仪表盘中打开</div>'; return; }
   try { await B.ready(); } catch (e) { /* */ }
   await load();
   try { const r = await $.post('reload'); document.getElementById('info').textContent = r.jobs + ' 个任务'; } catch (e) { /* */ }
