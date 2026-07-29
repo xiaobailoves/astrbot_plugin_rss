@@ -31,7 +31,7 @@ class FeedFetcher:
         self._title_max_length = title_max_length
         self._description_max_length = description_max_length
         self._max_items_per_poll = max_items_per_poll
-        self._logger = logging.getLogger("astrbot.rss")
+        self._logger = logging.getLogger("astrbot")
 
         # ETag 缓存（LRU）
         self._etags: OrderedDict[str, str] = OrderedDict()

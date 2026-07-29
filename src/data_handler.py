@@ -42,7 +42,7 @@ class DataHandler:
             with open(self.config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError:
-            logger = logging.getLogger("astrbot.rss")
+            logger = logging.getLogger("astrbot")
             logger.error(f"数据文件 {self.config_path} 已损坏，正在备份并重建...")
             backup_path = self.config_path + ".corrupted_backup"
             os.replace(self.config_path, backup_path)

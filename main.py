@@ -24,14 +24,17 @@ from .src.web_api import RssWebApi
 
 
 class MemoryLogHandler(logging.Handler):
-    """内存日志收集器，保留最近 N 条记录供 Web 面板查看"""
-    def __init__(self, capacity=300):
+    """内存日志收集器，只收集插件目录内的日志"""
+    def __init__(self, capacity=300, plugin_dir=""):
         super().__init__()
         self.records: deque[logging.LogRecord] = deque(maxlen=capacity)
+        self._plugin_dir = plugin_dir.replace("\\", "/")
 
     def emit(self, record: logging.LogRecord):
-        if not hasattr(record, 'plugin_tag'):
-            record.plugin_tag = 'RSS'
+        # 只收集插件自身的日志（按文件路径过滤）
+        path = record.pathname.replace("\\", "/") if record.pathname else ""
+        if self._plugin_dir and self._plugin_dir not in path:
+            return
         self.records.append(record)
 
     def list(self, level: str = "", count: int = 100):
@@ -63,8 +66,10 @@ class RssPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
 
-        self.logger = logging.getLogger("astrbot.rss")
-        self.log_handler = MemoryLogHandler()
+        self.logger = logging.getLogger("astrbot")
+        self.log_handler = MemoryLogHandler(
+            plugin_dir=__import__("os").path.dirname(__file__)
+        )
         self.logger.addHandler(self.log_handler)
         # 交互式订阅向导状态
         self._wizards: dict[str, dict] = {}

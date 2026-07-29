@@ -3,7 +3,7 @@ import logging
 
 from quart import request, jsonify
 
-_logger = logging.getLogger("astrbot.rss")
+_logger = logging.getLogger("astrbot")
 
 
 class RssWebApi:

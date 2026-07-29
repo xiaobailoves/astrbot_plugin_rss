@@ -42,7 +42,7 @@ class PushManager:
         self._t2i = t2i
         self._max_items_per_poll = max_items_per_poll
         self._max_failures = max_consecutive_failures
-        self._logger = logging.getLogger("astrbot.rss")
+        self._logger = logging.getLogger("astrbot")
 
     # ── Helpers ───────────────────────────────────────────
 
