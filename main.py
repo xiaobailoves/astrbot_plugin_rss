@@ -389,7 +389,7 @@ class RssPlugin(Star):
         """添加 RSSHub 端点"""
         """添加 RSSHub 端点"""
         if url is None:
-            self._wizards[event.unified_msg_origin] = {"step": "ep_add_url"}
+            self._wizards[event.unified_msg_origin] = {"_ts": time.time(), "step": "ep_add_url"}
             yield event.plain_result("🔗 输入 RSSHub 端点 URL:")
             return
         if url.endswith("/"):
@@ -434,7 +434,7 @@ class RssPlugin(Star):
             for i, u in enumerate(eps):
                 lines.append(f"  {i}. {u}")
             yield event.plain_result("\n".join(lines))
-            self._wizards[event.unified_msg_origin] = {"step": "ep_rm_pick"}
+            self._wizards[event.unified_msg_origin] = {"_ts": time.time(), "step": "ep_rm_pick"}
             return
         if idx < 0 or idx >= len(eps):
             yield event.plain_result("索引越界")
@@ -455,7 +455,19 @@ class RssPlugin(Star):
         w = self._wizards.get(user)
         if not w:
             return
-        text = event.message_str.strip()
+        # 清理过期向导（10 分钟未活动）
+        now = time.time()
+        stale = [u for u, wiz in self._wizards.items()
+                  if now - wiz.get("_ts", 0) > 600]
+        for u in stale:
+            del self._wizards[u]
+        if user not in self._wizards:
+            return
+        self._wizards[user]["_ts"] = now
+        # 从命令中提取纯参数：/rss add xxx → xxx
+        raw = event.message_str.strip()
+        parts = raw.split(maxsplit=1)
+        text = parts[1] if len(parts) > 1 else raw
 
         # ── 共享步骤: cron ──
         if w["step"] == "cron":
@@ -715,22 +727,6 @@ class RssPlugin(Star):
             del self._wizards[user]
             return
 
-    @filter.command("")
-    async def _wizard_handler(self, event: AstrMessageEvent):
-        """[内部] 处理交互式向导消息"""
-        user = event.unified_msg_origin
-        # 清理过期向导（超过 10 分钟未活动）
-        now = time.time()
-        stale = [u for u, w in self._wizards.items()
-                  if now - w.get("_ts", 0) > 600]
-        for u in stale:
-            del self._wizards[u]
-        if user not in self._wizards:
-            return  # 不在向导中，忽略
-        self._wizards[user]["_ts"] = now
-        async for result in self._handle_wizard(event):
-            yield result
-
     @rss.command("add")
     async def add_command(
         self, event: AstrMessageEvent,
@@ -756,9 +752,9 @@ class RssPlugin(Star):
             lines = ["📡 选择一个 RSSHub 端点（输入序号）:"]
             for i, u in enumerate(eps):
                 lines.append(f"  {i}. {u}")
-            lines.append("── 也可以直接 /rss add <序号> <路由> <Cron> [模型] 快速订阅")
+            lines.append("── 也可以直接 /rss add <序号> <路由> <Cron> [模型] 快速订阅 | /rss cancel 退出")
             yield event.plain_result("\n".join(lines))
-            self._wizards[event.unified_msg_origin] = {"step": "idx", "type": "rsshub"}
+            self._wizards[event.unified_msg_origin] = {"_ts": time.time(), "step": "idx", "type": "rsshub"}
             return
 
         if idx < 0 or idx >= len(self.data_handler.data.get("rsshub_endpoints", [])):
@@ -801,8 +797,12 @@ class RssPlugin(Star):
         renderer: str = None,
     ):
         """通过直连 URL 添加订阅（无参数进入引导）"""
+        if event.unified_msg_origin in self._wizards:
+            async for result in self._handle_wizard(event):
+                yield result
+            return
         if url is None:
-            self._wizards[event.unified_msg_origin] = {"step": "url", "cmd": "add-url"}
+            self._wizards[event.unified_msg_origin] = {"_ts": time.time(), "step": "url", "cmd": "add-url"}
             yield event.plain_result("🔗 输入 RSS Feed URL:\n── 也可以直接 /rss add-url <url> <Cron> [模型] 快速订阅")
             return
         url = self.parse_rss_url(url)
@@ -854,7 +854,7 @@ class RssPlugin(Star):
             for i, url in enumerate(subs_urls):
                 lines.append(f"  {i}. {self.data_handler.data[url]['info']['title']}")
             yield event.plain_result("\n".join(lines))
-            self._wizards[user] = {"step": "rm_pick"}
+            self._wizards[user] = {"_ts": time.time(), "step": "rm_pick"}
             return
         if idx < 0 or idx >= len(subs_urls):
             yield event.plain_result("索引越界, 请使用 /rss list 查看已经添加的订阅")
@@ -917,7 +917,7 @@ class RssPlugin(Star):
             for i, url in enumerate(subs_urls):
                 lines.append(f"  {i}. {self.data_handler.data[url]['info']['title']}")
             yield event.plain_result("\n".join(lines))
-            self._wizards[user] = {"step": "pause_pick"}
+            self._wizards[user] = {"_ts": time.time(), "step": "pause_pick"}
             return
         if idx < 0 or idx >= len(subs_urls):
             yield event.plain_result("索引越界")
@@ -944,7 +944,7 @@ class RssPlugin(Star):
             for j, (_, url) in enumerate(paused):
                 lines.append(f"  {j}. {self.data_handler.data[url]['info']['title']}")
             yield event.plain_result("\n".join(lines))
-            self._wizards[user] = {"step": "resume_pick"}
+            self._wizards[user] = {"_ts": time.time(), "step": "resume_pick"}
             return
         if idx < 0 or idx >= len(subs_urls):
             yield event.plain_result("索引越界")
@@ -964,6 +964,10 @@ class RssPlugin(Star):
     ):
         """修改订阅的 Cron 周期或模型（无参数进入引导）"""
         user = event.unified_msg_origin
+        if user in self._wizards:
+            async for result in self._handle_wizard(event):
+                yield result
+            return
         if idx is None:
             subs = self.data_handler.get_subs_channel_url(user)
             if not subs:
@@ -975,7 +979,7 @@ class RssPlugin(Star):
                 lines.append(f"  {i}. {info['title']}")
             lines.append("── 也可以直接 /rss update <序号> <Cron> [模型] 快速修改")
             yield event.plain_result("\n".join(lines))
-            self._wizards[user] = {"step": "pick", "cmd": "update"}
+            self._wizards[user] = {"_ts": time.time(), "step": "pick", "cmd": "update"}
             return
         subs_urls = self.data_handler.get_subs_channel_url(user)
         if idx < 0 or idx >= len(subs_urls):
@@ -1018,7 +1022,7 @@ class RssPlugin(Star):
             for i, url in enumerate(subs_urls):
                 lines.append(f"  {i}. {self.data_handler.data[url]['info']['title']}")
             yield event.plain_result("\n".join(lines))
-            self._wizards[user] = {"step": "get_pick"}
+            self._wizards[user] = {"_ts": time.time(), "step": "get_pick"}
             return
         if idx < 0 or idx >= len(subs_urls):
             yield event.plain_result("索引越界, 请使用 /rss list 查看已经添加的订阅")
@@ -1062,7 +1066,7 @@ class RssPlugin(Star):
     async def test_command(self, event: AstrMessageEvent, url: str = None):
         """预览 RSS Feed 内容（无需订阅）"""
         if url is None:
-            self._wizards[event.unified_msg_origin] = {"step": "test_url"}
+            self._wizards[event.unified_msg_origin] = {"_ts": time.time(), "step": "test_url"}
             yield event.plain_result("🔗 输入要预览的 RSS Feed URL:")
             return
         url = self.parse_rss_url(url)
@@ -1095,6 +1099,38 @@ class RssPlugin(Star):
             time_str = f"  [{t}] " if t else "  "
             lines.append(f"{time_str}📌 {item.title[:60]}")
         yield event.plain_result("\n".join(lines))
+
+    @rss.command("cancel")
+    async def cancel_command(self, event: AstrMessageEvent):
+        """退出交互式引导"""
+        user = event.unified_msg_origin
+        if user in self._wizards:
+            del self._wizards[user]
+            yield event.plain_result("已退出引导模式")
+        else:
+            yield event.plain_result("当前不在引导中")
+
+    @rss.command("filter-help")
+    async def filter_help_command(self, event: AstrMessageEvent):
+        """查看正则过滤规则说明"""
+        yield event.plain_result(
+            "🔍 内容过滤规则说明\n\n"
+            "━━ 关键词过滤 ━━\n"
+            "直接输入关键词，逗号分隔，大小写不敏感\n"
+            "例：广告, 抽奖, 推广\n"
+            "标题或正文包含任意一个 → 跳过\n\n"
+            "━━ 正则过滤 ━━\n"
+            "以 regex: 开头，后面写正则表达式\n"
+            "例：regex:.*病毒.*\n"
+            "     regex:(?i)spam\n"
+            "     regex:https?://推广链接\\.com\n\n"
+            "━━ 白名单 ━━\n"
+            "只推送匹配的词条，未命中 → 跳过\n"
+            "例：Python, AI, 开源\n\n"
+            "━━ 组合使用 ━━\n"
+            "白名单命中 + 黑名单未命中 → 推送\n"
+            "黑白名单都为空 → 不启用过滤"
+        )
 
     @rss.command("cron")
     async def cron_command(self, event: AstrMessageEvent, arg: str = ""):

@@ -203,6 +203,18 @@ class PushManager:
                 await self._context.send_message(job["user"], msc)
                 retry_success.append(job)
                 self._record_history(job["url"], job["user"], item)
+                # 加入指纹防止后续轮询重复推送
+                data = self._data_handler.data
+                url = job["url"]
+                user = job["user"]
+                if url in data and user in data[url].get("subscribers", {}):
+                    fps = self._fetcher.fingerprints(
+                        item.guid, item.link, item.title, item.description
+                    )
+                    ph = data[url]["subscribers"][user].setdefault("pushed_hashes", [])
+                    for fp in fps:
+                        if fp not in ph:
+                            ph.append(fp)
                 self._logger.info(
                     f"✅ 补推成功: {item_data.get('title', '')[:30]} → {job['user']}"
                 )
@@ -266,7 +278,8 @@ class PushManager:
                 )
             if not rss_items:
                 self._logger.info(f"😴 RSS {url} 无新内容 - {user}")
-                self._on_failure(data, url, user, "无新内容")
+                # 无新内容不是失败，重置计数
+                data[url]["subscribers"][user]["consecutive_failures"] = 0
                 return
 
             # 多指纹去重：任一匹配即跳过
