@@ -30,6 +30,8 @@ class MemoryLogHandler(logging.Handler):
         self.records: deque[logging.LogRecord] = deque(maxlen=capacity)
 
     def emit(self, record: logging.LogRecord):
+        if not hasattr(record, 'plugin_tag'):
+            record.plugin_tag = 'RSS'
         self.records.append(record)
 
     def list(self, level: str = "", count: int = 100):
