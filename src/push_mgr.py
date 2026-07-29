@@ -42,9 +42,73 @@ class PushManager:
         self._t2i = t2i
         self._max_items_per_poll = max_items_per_poll
         self._max_failures = max_consecutive_failures
-        self._logger = logging.getLogger("astrbot")
+        self._logger = logging.getLogger("astrbot.rss")
 
     # ── Helpers ───────────────────────────────────────────
+
+    async def _apply_filter(self, sub: dict, items: list) -> list:
+        """内容过滤：off / regex / ai"""
+        mode = sub.get("filter_mode", "off")
+        if mode == "off" or not items:
+            return items
+
+        if mode == "regex":
+            blacklist = sub.get("filter_blacklist", [])
+            whitelist = sub.get("filter_whitelist", [])
+            if not blacklist and not whitelist:
+                return items
+            import re
+            passed = []
+            for item in items:
+                text = f"{item.title} {item.description}"
+                # 白名单检查
+                if whitelist:
+                    if not any(self._match_kw(text, kw) for kw in whitelist):
+                        continue
+                # 黑名单检查
+                if blacklist:
+                    if any(self._match_kw(text, kw) for kw in blacklist):
+                        continue
+                passed.append(item)
+            self._logger.debug(
+                f"🔇 正则过滤: {len(items)}→{len(passed)} 条"
+            )
+            return passed
+
+        if mode == "ai":
+            try:
+                provider = self._context.get_using_provider()
+            except Exception:
+                self._logger.warning("AI 过滤不可用：无法获取 LLM provider")
+                return items
+            prompt_tpl = sub.get("filter_ai_prompt",
+                '判断以下 RSS 条目是否值得推送，只回复"是"或"否"。\n\n标题: {title}\n正文: {body}')
+            passed = []
+            for item in items:
+                prompt = prompt_tpl.format(
+                    title=item.title, body=(item.description or "")[:500]
+                )
+                try:
+                    resp = await provider.text_chat(prompt)
+                    if resp and "是" in str(resp)[:3]:
+                        passed.append(item)
+                except Exception as e:
+                    self._logger.warning(f"AI 过滤调用失败: {e}，保留条目")
+                    passed.append(item)
+            self._logger.debug(
+                f"🤖 AI 过滤: {len(items)}→{len(passed)} 条"
+            )
+            return passed
+
+        return items  # unknown mode → pass through
+
+    @staticmethod
+    def _match_kw(text: str, kw: str) -> bool:
+        """匹配关键词：regex: 开头为正则，否则为大小写不敏感包含"""
+        if kw.startswith("regex:"):
+            import re
+            return bool(re.search(kw[6:], text))
+        return kw.lower() in text.lower()
 
     def _on_failure(self, data: dict, url: str, user: str, reason: str = ""):
         """跟踪连续失败次数，超过阈值自动暂停"""
@@ -92,6 +156,7 @@ class PushManager:
                 "pubDate": item.pubDate,
                 "pubDate_timestamp": item.pubDate_timestamp,
                 "pic_urls": item.pic_urls,
+                "guid": getattr(item, 'guid', ''),
             },
             "failed_at": int(time.time()),
         })
@@ -126,6 +191,7 @@ class PushManager:
                     pubDate=item_data["pubDate"],
                     pubDate_timestamp=item_data["pubDate_timestamp"],
                     pic_urls=item_data["pic_urls"],
+                    guid=item_data.get("guid", ""),
                 )
                 # 补推使用默认渲染器排版，前缀标记
                 renderer = self._renderers.get("default")
@@ -180,29 +246,48 @@ class PushManager:
 
             last_update = data[url]["subscribers"][user]["last_update"]
             latest_link = data[url]["subscribers"][user]["latest_link"]
-            pushed_hashes = data[url]["subscribers"][user].get("pushed_hashes", [])
+            pushed_hashes = list(data[url]["subscribers"][user].get("pushed_hashes", []))
+            poll_start_ts = int(time.time())
+            update_mode = sub.get("update_mode", "time")
 
-            rss_items = await self._fetcher.poll(
-                url,
-                num=self._max_items_per_poll,
-                after_timestamp=last_update,
-                after_link=latest_link,
-            )
+            if update_mode == "guid":
+                # GUID 模式：跳过时间过滤，纯哈希去重
+                rss_items = await self._fetcher.poll(
+                    url, num=self._max_items_per_poll,
+                    after_timestamp=0, after_link="",
+                )
+            else:
+                # 时间模式：现有逻辑
+                rss_items = await self._fetcher.poll(
+                    url,
+                    num=self._max_items_per_poll,
+                    after_timestamp=last_update,
+                    after_link=latest_link,
+                )
             if not rss_items:
                 self._logger.info(f"😴 RSS {url} 无新内容 - {user}")
                 self._on_failure(data, url, user, "无新内容")
                 return
 
-            # 指纹去重
+            # 多指纹去重：任一匹配即跳过
             new_items = []
             for item in rss_items:
-                fp = self._fetcher.fingerprint(item.title, item.link, item.description)
-                if fp in pushed_hashes:
+                fps = self._fetcher.fingerprints(
+                    getattr(item, 'guid', ''), item.link, item.title, item.description
+                )
+                if any(fp in pushed_hashes for fp in fps):
                     continue
-                pushed_hashes.append(fp)
+                pushed_hashes.extend(fps)
                 new_items.append(item)
 
             if not new_items:
+                return
+
+            # ── 内容过滤 ────────────────────────────────
+            new_items = await self._apply_filter(sub, new_items)
+
+            if not new_items:
+                self._logger.debug(f"🔇 RSS {url} 过滤后无条目 - {user}")
                 return
 
             # ── 渲染器调度 ──────────────────────────────
@@ -217,6 +302,20 @@ class PushManager:
                 self._logger.debug(
                     f"📄 使用渲染器: {renderer.name} ({url})"
                 )
+
+                # 成功：重置失败计数 + 保存状态
+                # 重检查：推送期间订阅可能已被删除
+                if url not in data or user not in data[url].get("subscribers", {}):
+                    self._logger.debug(f"⚠️ RSS {url} 推送期间订阅已被删除 - {user}")
+                    return
+                data[url]["subscribers"][user]["consecutive_failures"] = 0
+                pushed_hashes = self._fetcher.cleanup_hashes(pushed_hashes)
+                data[url]["subscribers"][user]["pushed_hashes"] = pushed_hashes
+                data[url]["subscribers"][user]["last_update"] = poll_start_ts
+                data[url]["subscribers"][user]["latest_link"] = new_items[-1].link
+                await self._data_handler.save_data()
+                self._logger.info(f"✅ RSS {url} 推送完成 - {user}")
+
             except Exception as e:
                 self._on_failure(data, url, user, str(e)[:80])
                 if self._is_unrecoverable(e):
@@ -225,13 +324,3 @@ class PushManager:
                     self._logger.error(f"❌ 推送失败: {e}")
                     for item in new_items:
                         self._queue_failed(user, url, item)
-
-            # 成功：重置失败计数
-            data[url]["subscribers"][user]["consecutive_failures"] = 0
-
-            pushed_hashes = self._fetcher.cleanup_hashes(pushed_hashes)
-            data[url]["subscribers"][user]["pushed_hashes"] = pushed_hashes
-            data[url]["subscribers"][user]["last_update"] = max_ts
-            data[url]["subscribers"][user]["latest_link"] = new_items[-1].link
-            await self._data_handler.save_data()
-            self._logger.info(f"✅ RSS {url} 推送完成 - {user}")

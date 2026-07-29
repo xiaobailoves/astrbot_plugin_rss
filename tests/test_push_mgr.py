@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, AsyncMock
 
 from src.push_mgr import PushManager
 from src.data_handler import DataHandler
+from src.rss import RSSItem
 
 
 class MockFetcher:
@@ -18,8 +19,8 @@ class MockFetcher:
     async def poll(self, url, **kw):
         from src.rss import RSSItem
         return [RSSItem("Chan", "Title", "https://x.com/1", "Body", "2026-07-28", 1722000000, [])]
-    def fingerprint(self, *a):
-        return "abc123"
+    def fingerprints(self, *a):
+        return ["abc123"]
     def cleanup_hashes(self, h, max_keep=200):
         return h[-max_keep:] if len(h) > max_keep else h
 
@@ -139,3 +140,36 @@ class TestPushManager:
         }
         r = pm._pick_renderer("aiocqhttp:123:user", "http://feed")
         assert r.name == "test"
+
+    @pytest.mark.asyncio
+    async def test_execute_failure_does_not_reset_count(self):
+        """B1/B2 回归：推送失败时不应重置失败计数，不应保存推送状态"""
+        # Use a renderer that always fails
+        class FailingRenderer:
+            name = "fail"
+            async def send(self, *a, **kw): raise Exception("send failed")
+        pm = PushManager(
+            context=MagicMock(),
+            data_handler=DataHandler(tempfile.mktemp(suffix=".json")),
+            fetcher=MockFetcher(),
+            builder=MockBuilder(),
+            renderers={"fail": FailingRenderer()},
+            max_consecutive_failures=3,
+        )
+        pm._data_handler.data = {
+            "http://feed": {
+                "subscribers": {"u": {
+                    "pushed_hashes": [], "last_update": 0, "latest_link": "",
+                    "consecutive_failures": 2, "paused": False,
+                }},
+                "info": {"title": "T"},
+            }
+        }
+        await pm.execute("http://feed", "u")
+        sub = pm._data_handler.data["http://feed"]["subscribers"]["u"]
+        # 失败计数应该递增到 3（触发自动暂停）
+        assert sub["consecutive_failures"] == 3
+        assert sub["paused"] is True
+        # pushed_hashes 不应更新（推送失败不保存）
+        assert sub["pushed_hashes"] == []
+        assert sub["last_update"] == 0

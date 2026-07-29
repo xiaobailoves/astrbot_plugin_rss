@@ -46,8 +46,17 @@ class BaseRenderer:
             description=(item.description or "")[:self.max_desc].replace("#", "\n#"),
         )
 
+    async def parse_item(self, item):
+        """内容预处理钩子。子类可重写以提取/转换/增强 RSS 内容。
+
+        返回 item 本身（修改属性后）或一个新的 RSSItem。
+        示例：解析 HTML 描述中的播放量、弹幕数、BBCode 等站点特有字段。
+        """
+        return item
+
     async def render_item(self, item) -> list:
-        """渲染单条为组件列表。有 template → 模板模式，否则 → 默认排版。"""
+        """渲染单条为组件列表。先 parse_item 再排版。"""
+        item = await self.parse_item(item)
         if self.template is not None:
             ctx = self._format_context(item)
             text = self.template.format(**ctx)

@@ -82,6 +82,41 @@ class MyRenderer(BaseRenderer):
 
 ---
 
+## 进阶：站点定制解析
+
+如果 RSS 源的 HTML 描述里藏着结构化数据（播放量、弹幕数、BBCode），可以在排版前先提取。重写 `parse_item`：
+
+```python
+# src/models/bilibili.py
+import re
+from .base import BaseRenderer
+
+class BilibiliRenderer(BaseRenderer):
+    name = "bilibili"
+    template = "📺 {chan_title}\n📌 {title}\n{stats}💬 {description}"
+
+    async def parse_item(self, item):
+        desc = item.description or ""
+        play = re.search(r'播放[：:]?\s*([\d.]+万?)', desc)
+        danmu = re.search(r'弹幕[：:]?\s*([\d.]+万?)', desc)
+        item._stats = ""
+        if play: item._stats += f"▶️ {play.group(1)}播放 "
+        if danmu: item._stats += f"💬 {danmu.group(1)}弹幕"
+        if item._stats: item._stats += "\n"
+        # 去掉已提取的统计行
+        item.description = re.sub(r'^(播放|弹幕|收藏)[：:].*\n?', '', desc, flags=re.MULTILINE).strip()
+        return item
+
+    def _format_context(self, item):
+        ctx = super()._format_context(item)
+        ctx["stats"] = getattr(item, '_stats', '')
+        return ctx
+```
+
+`parse_item` 返回的 item 会自动传给模板，通过 `_format_context` 把自定义字段（`stats`）暴露给 `{stats}` 占位符。
+
+---
+
 ## 进阶：动态内容
 
 如果模板里需要动态决定的内容（比如根据条件显示不同标记），重写 `_format_context`：

@@ -57,15 +57,15 @@ class TestFeedFetcher:
         assert "https://" in fetcher.normalize_url("example.com/feed")
         assert fetcher.normalize_url("http://example.com") == "http://example.com"
 
-    def test_fingerprint_deterministic(self, fetcher):
-        f1 = fetcher.fingerprint("A", "B", "C")
-        f2 = fetcher.fingerprint("A", "B", "C")
+    def test_fingerprints_deterministic(self, fetcher):
+        f1 = fetcher.fingerprints("G1", "L", "T", "D")
+        f2 = fetcher.fingerprints("G1", "L", "T", "D")
         assert f1 == f2
-        assert len(f1) == 16  # 16 hex chars
+        assert len(f1) == 3  # guid, sid, hash
 
-    def test_fingerprint_different_content(self, fetcher):
-        f1 = fetcher.fingerprint("A", "B", "C")
-        f2 = fetcher.fingerprint("X", "B", "C")
+    def test_fingerprints_different_content(self, fetcher):
+        f1 = fetcher.fingerprints("G1", "L", "T", "D")
+        f2 = fetcher.fingerprints("G2", "L", "T", "D")
         assert f1 != f2
 
     def test_cleanup_hashes(self, fetcher):

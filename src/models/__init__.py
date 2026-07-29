@@ -6,7 +6,7 @@ import pkgutil
 
 from .base import BaseRenderer
 
-_logger = logging.getLogger("astrbot")
+_logger = logging.getLogger("astrbot.rss")
 
 
 def discover_renderers(builder) -> dict[str, BaseRenderer]:

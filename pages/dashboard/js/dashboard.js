@@ -355,7 +355,7 @@ function showAddSub() {
       var is = typeSel.value === 'rsshub';
       document.getElementById('ad-ep-wrap').style.display = is ? 'block' : 'none';
       document.getElementById('ad-route-wrap').style.display = is ? 'block' : 'none';
-      document.getElementById('ad-url-wrap').style.display = is ? 'block' : 'none';
+      document.getElementById('ad-url-wrap').style.display = is ? 'none' : 'block';
     };
     typeSel.onchange = toggle;
     toggle();
@@ -374,13 +374,13 @@ function addEp() {
 
 function delSub(idx, s) {
   confirm('确定删除 ' + esc(s.title) + ' ？', function () {
-    $.post('subscriptions/delete', { user: s.user || '', idx }).then(() => { toast('已删除'); load(); }).catch(e => toast('删除失败: ' + e, true));
+    $.post('subscriptions/delete', { user: s.user || '', url: s.url }).then(() => { toast('已删除'); load(); }).catch(e => toast('删除失败: ' + e, true));
   });
 }
 
 function togglePause(idx, s) {
   const ep = s.paused ? 'resume' : 'pause';
-  $.post('subscriptions/' + ep, { user: s.user || '', idx }).then(() => { toast(s.paused ? '已恢复' : '已暂停'); load(); }).catch(e => toast('操作失败: ' + e, true));
+  $.post('subscriptions/' + ep, { user: s.user || '', url: s.url }).then(() => { toast(s.paused ? '已恢复' : '已暂停'); load(); }).catch(e => toast('操作失败: ' + e, true));
 }
 
 function delEp(idx) {
@@ -390,7 +390,7 @@ function delEp(idx) {
 }
 
 function fetchItems(idx, s) {
-  $.post('subscriptions/fetch', { user: s.user || '', idx: idx }).then(r => {
+  $.post('subscriptions/fetch', { user: s.user || '', url: s.url }).then(r => {
     const items = r.items || [];
     if (!items.length) return toast('暂无新内容');
     let html = '<div style="max-height:400px;overflow-y:auto;font-size:13px;">';
@@ -404,6 +404,15 @@ function fetchItems(idx, s) {
 
 function showDetail(idx, s) {
   var pausedTag = s.paused ? '<span class="tag" style="background:#fff7ed;color:#9a3412">已暂停</span>' : '<span class="tag tag-green">运行中</span>';
+  var fm = s.filter_mode || 'off';
+  var fmLabel = fm === 'off' ? '关闭' : fm === 'regex' ? '正则/关键词' : fm === 'ai' ? 'AI 判断' : fm;
+  var filterInfo = '<span style="color:var(--muted)">过滤</span><span>' + fmLabel + '</span>';
+  if (fm === 'regex') {
+    var bl = (s.filter_blacklist || []).join(', ') || '无';
+    var wl = (s.filter_whitelist || []).join(', ') || '无';
+    filterInfo += '<span style="color:var(--muted)">黑名单</span><span style="font-size:12px">' + esc(bl) + '</span>';
+    filterInfo += '<span style="color:var(--muted)">白名单</span><span style="font-size:12px">' + esc(wl) + '</span>';
+  }
   var body =
     '<div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px;">' +
       '<span style="color:var(--muted)">频道</span><b>' + esc(s.title) + '</b>' +
@@ -412,6 +421,7 @@ function showDetail(idx, s) {
       '<span style="color:var(--muted)">Cron</span><code style="font-size:12px">' + esc(s.cron) + '</code>' +
       '<span style="color:var(--muted)">模型</span><span>' + (s.renderer ? '<span class="tag tag-green">' + esc(s.renderer) + '</span>' : '<span class="tag tag-gray">默认</span>') + '</span>' +
       '<span style="color:var(--muted)">状态</span><span>' + pausedTag + '</span>' +
+      filterInfo +
     '</div>';
   modal('订阅详情', body, [
     { label: '编辑', primary: false, cb: function() { editSub(idx, s); } },
@@ -421,19 +431,34 @@ function showDetail(idx, s) {
 }
 
 function editSub(idx, s) {
-  const body = '<div style="margin-bottom:12px;"><label class="f-label">用户 / 群聊</label><input id="ed-user" value="' + esc(s.user || '') + '" /></div>' +
+  var fm = s.filter_mode || 'off';
+  var bl = (s.filter_blacklist || []).join(', ');
+  var wl = (s.filter_whitelist || []).join(', ');
+  var body = '<div style="margin-bottom:12px;"><label class="f-label">用户 / 群聊</label><input id="ed-user" value="' + esc(s.user || '') + '" /></div>' +
     '<div style="margin-bottom:12px;"><label class="f-label">Cron 表达式</label><input id="ed-cron" value="' + esc(s.cron) + '" /></div>' +
-    '<div style="margin-bottom:12px;"><label class="f-label">模型</label><select id="ed-model" style="width:100%"><option value=""' + (s.renderer ? '' : ' selected') + '>默认</option><option value="twitter"' + (s.renderer === 'twitter' ? ' selected' : '') + '>twitter</option><option value="compose"' + (s.renderer === 'compose' ? ' selected' : '') + '>compose</option></select></div>';
+    '<div style="margin-bottom:12px;"><label class="f-label">模型</label><select id="ed-model" style="width:100%"><option value=""' + (s.renderer ? '' : ' selected') + '>默认</option><option value="twitter"' + (s.renderer === 'twitter' ? ' selected' : '') + '>twitter</option><option value="compose"' + (s.renderer === 'compose' ? ' selected' : '') + '>compose</option></select></div>' +
+    '<div style="margin-bottom:12px;"><label class="f-label">更新判断</label><select id="ed-update" style="width:100%"><option value="time"' + ((s.update_mode || 'time') === 'time' ? ' selected' : '') + '>时间戳比较（默认）</option><option value="guid"' + (s.update_mode === 'guid' ? ' selected' : '') + '>GUID 哈希</option></select></div>' +
+    '<div style="margin-bottom:12px;"><label class="f-label">内容过滤</label><select id="ed-filter" style="width:100%" onchange="document.getElementById(\'ed-regex-opts\').style.display=this.value===\'regex\'?\'block\':\'none\'"><option value="off"' + (fm === 'off' ? ' selected' : '') + '>关闭</option><option value="regex"' + (fm === 'regex' ? ' selected' : '') + '>正则/关键词</option><option value="ai"' + (fm === 'ai' ? ' selected' : '') + '>AI 判断</option></select></div>' +
+    '<div id="ed-regex-opts" style="display:' + (fm === 'regex' ? 'block' : 'none') + '"><div style="margin-bottom:8px;"><label class="f-label">黑名单（逗号分隔，regex: 开头为正则）</label><input id="ed-bl" value="' + esc(bl) + '" placeholder="广告, 抽奖, regex:.*推广.*" /></div><div style="margin-bottom:12px;"><label class="f-label">白名单（只推送匹配的）</label><input id="ed-wl" value="' + esc(wl) + '" placeholder="留空=不限制" /></div></div>';
   modal('编辑订阅', body, [
     { label: '取消' },
     { label: '保存', primary: true, cb: function () {
-      const newUser = document.getElementById('ed-user').value;
-      const cron = document.getElementById('ed-cron').value;
-      const model = document.getElementById('ed-model').value;
-      const p = { cron, user: s.user || '', idx };
+      var newUser = document.getElementById('ed-user').value;
+      var cron = document.getElementById('ed-cron').value;
+      var model = document.getElementById('ed-model').value;
+      var filterMode = document.getElementById('ed-filter').value;
+      var updateMode = document.getElementById('ed-update').value;
+      var p = { cron: cron, user: s.user || '', url: s.url, update_mode: updateMode };
       if (newUser && newUser !== s.user) p.new_user = newUser;
-      if (model === ' ') p.renderer = ''; else if (model) p.renderer = model;
-      $.post('subscriptions/update', p).then(() => { toast('已更新'); load(); }).catch(e => toast('更新失败: ' + e, true));
+      if (model === '') p.renderer = ''; else if (model) p.renderer = model;
+      p.filter_mode = filterMode;
+      if (filterMode === 'regex') {
+        var blRaw = document.getElementById('ed-bl').value;
+        var wlRaw = document.getElementById('ed-wl').value;
+        p.filter_blacklist = blRaw ? blRaw.split(',').map(function(x){return x.trim()}).filter(Boolean) : [];
+        p.filter_whitelist = wlRaw ? wlRaw.split(',').map(function(x){return x.trim()}).filter(Boolean) : [];
+      }
+      $.post('subscriptions/update', p).then(function () { toast('已更新'); load(); }).catch(function (e) { toast('更新失败: ' + e, true); });
     }},
   ]);
 }

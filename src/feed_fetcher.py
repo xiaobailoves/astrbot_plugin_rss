@@ -31,7 +31,7 @@ class FeedFetcher:
         self._title_max_length = title_max_length
         self._description_max_length = description_max_length
         self._max_items_per_poll = max_items_per_poll
-        self._logger = logging.getLogger("astrbot")
+        self._logger = logging.getLogger("astrbot.rss")
 
         # ETag 缓存（LRU）
         self._etags: OrderedDict[str, str] = OrderedDict()
@@ -152,6 +152,7 @@ class FeedFetcher:
 
         for entry in feed.entries:
             try:
+                guid = entry.get("guid", "") or entry.get("id", "") or ""
                 title = entry.get("title", "无标题")
                 if len(title) > self._title_max_length:
                     title = title[: self._title_max_length] + "..."
@@ -185,6 +186,7 @@ class FeedFetcher:
                             RSSItem(
                                 chan_title, title, link, description,
                                 pub_date, pub_date_timestamp, pic_url_list,
+                                guid=guid,
                             )
                         )
                         cnt += 1
@@ -196,6 +198,7 @@ class FeedFetcher:
                             RSSItem(
                                 chan_title, title, link, description,
                                 "", 0, pic_url_list,
+                                guid=guid,
                             )
                         )
                         cnt += 1
@@ -213,10 +216,19 @@ class FeedFetcher:
     # ── Utilities ─────────────────────────────────────────
 
     @staticmethod
-    def fingerprint(title: str, link: str, description: str) -> str:
-        """SHA-256 指纹，用于跨轮次条目去重"""
-        material = f"{title}|{link}|{description[:300]}"
-        return hashlib.sha256(material.encode()).hexdigest()[:16]
+    def fingerprints(guid: str, link: str, title: str, description: str) -> list[str]:
+        """多指纹去重：GUID / 身份哈希 / 内容哈希，任一匹配即跳过"""
+        fp = []
+        # 原始 GUID（最可靠）
+        if guid:
+            fp.append(f"guid:{guid}")
+        # 身份哈希：基于 GUID 或链接（跨轮次稳定的标识）
+        identity = hashlib.sha256((guid or link).encode()).hexdigest()[:16]
+        fp.append(f"sid:{identity}")
+        # 内容哈希：基于标题+链接+正文（内容变化会被检测）
+        content = f"{title}|{link}|{description[:300]}"
+        fp.append(f"hash:{hashlib.sha256(content.encode()).hexdigest()[:16]}")
+        return fp
 
     @staticmethod
     def cleanup_hashes(hashes: list, max_keep: int = 200) -> list:

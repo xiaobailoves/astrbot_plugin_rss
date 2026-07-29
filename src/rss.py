@@ -10,6 +10,7 @@ class RSSItem:
     pubDate: str
     pubDate_timestamp: int
     pic_urls: list[str]
+    guid: str = ""
 
     def __str__(self):
         return f"{self.title} - {self.link} - {self.description} - {self.pubDate}"

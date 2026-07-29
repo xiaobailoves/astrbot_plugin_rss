@@ -3,17 +3,7 @@ import logging
 
 from quart import request, jsonify
 
-_logger = logging.getLogger("astrbot")
-
-
-class _FakeEvent:
-    """模拟 AstrMessageEvent，用于复用 _add_url"""
-
-    def __init__(self, unified_msg_origin):
-        self.unified_msg_origin = unified_msg_origin
-
-    def plain_result(self, msg):
-        raise Exception(msg)
+_logger = logging.getLogger("astrbot.rss")
 
 
 class RssWebApi:
@@ -92,6 +82,10 @@ class RssWebApi:
                     "cron": sub.get("cron_expr", ""),
                     "paused": sub.get("paused", False),
                     "renderer": sub.get("renderer", ""),
+                    "filter_mode": sub.get("filter_mode", "off"),
+                    "update_mode": sub.get("update_mode", "time"),
+                    "filter_blacklist": sub.get("filter_blacklist", []),
+                    "filter_whitelist": sub.get("filter_whitelist", []),
                 })
         return jsonify(result)
 
@@ -108,7 +102,9 @@ class RssWebApi:
             return jsonify({"error": "端点索引无效"}), 400
         url = eps[ep_idx] + route
         try:
-            info = await self._plugin._add_url(url, cron, _FakeEvent(user))
+            ok, info = await self._plugin._add_subscription(url, cron, user)
+            if not ok:
+                return jsonify({"error": info}), 400
         except Exception as e:
             return jsonify({"error": f"添加失败: {e}"}), 500
         self._plugin._add_single_job(url, user, cron)
@@ -124,7 +120,9 @@ class RssWebApi:
             return jsonify({"error": "user / url 不能为空"}), 400
         url = self._plugin.fetcher.normalize_url(url)
         try:
-            info = await self._plugin._add_url(url, cron, _FakeEvent(user), renderer)
+            ok, info = await self._plugin._add_subscription(url, cron, user, renderer)
+            if not ok:
+                return jsonify({"error": info}), 400
         except Exception as e:
             return jsonify({"error": f"添加失败: {e}"}), 500
         self._plugin._add_single_job(url, user, cron)
@@ -133,13 +131,15 @@ class RssWebApi:
     async def _del_sub(self):
         data = await request.get_json()
         user = data.get("user", "")
-        idx = data.get("idx", -1)
+        url = data.get("url", "")
         if not user:
             return jsonify({"error": "缺少 user 参数"}), 400
-        subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
-        if idx < 0 or idx >= len(subs_urls):
-            return jsonify({"error": "索引越界"}), 404
-        url = subs_urls[idx]
+        if not url:
+            idx = data.get("idx", -1)
+            subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
+            if idx < 0 or idx >= len(subs_urls):
+                return jsonify({"error": "索引越界"}), 404
+            url = subs_urls[idx]
         self._plugin.data_handler.data[url]["subscribers"].pop(user, None)
         if not self._plugin.data_handler.data[url]["subscribers"]:
             self._plugin.data_handler.data.pop(url)
@@ -150,11 +150,13 @@ class RssWebApi:
     async def _pause_sub(self):
         data = await request.get_json()
         user = data.get("user", "")
-        idx = data.get("idx", -1)
-        subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
-        if idx < 0 or idx >= len(subs_urls):
-            return jsonify({"error": "索引越界"}), 404
-        url = subs_urls[idx]
+        url = data.get("url", "")
+        if not url:
+            idx = data.get("idx", -1)
+            subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
+            if idx < 0 or idx >= len(subs_urls):
+                return jsonify({"error": "索引越界"}), 404
+            url = subs_urls[idx]
         self._plugin.data_handler.data[url]["subscribers"][user]["paused"] = True
         await self._plugin.data_handler.save_data()
         return jsonify({"ok": True})
@@ -162,11 +164,13 @@ class RssWebApi:
     async def _resume_sub(self):
         data = await request.get_json()
         user = data.get("user", "")
-        idx = data.get("idx", -1)
-        subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
-        if idx < 0 or idx >= len(subs_urls):
-            return jsonify({"error": "索引越界"}), 404
-        url = subs_urls[idx]
+        url = data.get("url", "")
+        if not url:
+            idx = data.get("idx", -1)
+            subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
+            if idx < 0 or idx >= len(subs_urls):
+                return jsonify({"error": "索引越界"}), 404
+            url = subs_urls[idx]
         self._plugin.data_handler.data[url]["subscribers"][user]["paused"] = False
         await self._plugin.data_handler.save_data()
         return jsonify({"ok": True})
@@ -196,20 +200,24 @@ class RssWebApi:
     async def _update_sub(self):
         data = await request.get_json()
         user = data.get("user", "")
-        idx = data.get("idx", -1)
+        url = data.get("url", "")
         cron = data.get("cron", "0 * * * *")
         renderer = data.get("renderer")
         new_user = data.get("new_user", "")
         if not user:
             return jsonify({"error": "缺少 user 参数"}), 400
-        subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
-        if idx < 0 or idx >= len(subs_urls):
-            return jsonify({"error": "索引越界"}), 404
-        url = subs_urls[idx]
+        if not url:
+            idx = data.get("idx", -1)
+            subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
+            if idx < 0 or idx >= len(subs_urls):
+                return jsonify({"error": "索引越界"}), 404
+            url = subs_urls[idx]
 
         if new_user and new_user != user:
             # 转移订阅到新用户/群聊
-            old_sub = self._plugin.data_handler.data[url]["subscribers"].pop(user)
+            old_sub = self._plugin.data_handler.data[url]["subscribers"].pop(user, None)
+            if old_sub is None:
+                return jsonify({"error": "订阅不存在"}), 404
             self._plugin.data_handler.data[url]["subscribers"][new_user] = old_sub
             self._plugin._remove_single_job(url, user)
             user = new_user
@@ -220,6 +228,15 @@ class RssWebApi:
             sub["renderer"] = renderer
         elif renderer == "" and "renderer" in sub:
             del sub["renderer"]
+        # 更新模式 + 过滤设置
+        if "update_mode" in data:
+            sub["update_mode"] = data["update_mode"]
+        if "filter_mode" in data:
+            sub["filter_mode"] = data["filter_mode"]
+        if "filter_blacklist" in data:
+            sub["filter_blacklist"] = data["filter_blacklist"]
+        if "filter_whitelist" in data:
+            sub["filter_whitelist"] = data["filter_whitelist"]
         await self._plugin.data_handler.save_data()
         self._plugin._remove_single_job(url, user)
         self._plugin._add_single_job(url, user, cron)
@@ -228,13 +245,15 @@ class RssWebApi:
     async def _fetch_items(self):
         data = await request.get_json()
         user = data.get("user", "")
-        idx = data.get("idx", -1)
+        url = data.get("url", "")
         if not user:
             return jsonify({"error": "缺少 user 参数"}), 400
-        subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
-        if idx < 0 or idx >= len(subs_urls):
-            return jsonify({"error": "索引越界"}), 404
-        url = subs_urls[idx]
+        if not url:
+            idx = data.get("idx", -1)
+            subs_urls = self._plugin.data_handler.get_subs_channel_url(user)
+            if idx < 0 or idx >= len(subs_urls):
+                return jsonify({"error": "索引越界"}), 404
+            url = subs_urls[idx]
         try:
             items = await self._plugin.fetcher.poll(url)
         except Exception as e:
@@ -289,7 +308,7 @@ class RssWebApi:
     async def _update_config(self):
         data = await request.get_json()
         allowed = {"title_max_length","description_max_length","max_items_per_poll",
-                    "compose","t2i","is_hide_url","verify_ssl","proxy"}
+                    "max_consecutive_failures","compose","t2i","is_hide_url","verify_ssl","proxy"}
         for key, value in data.items():
             if key not in allowed:
                 continue

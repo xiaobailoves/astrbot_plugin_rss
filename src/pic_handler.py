@@ -7,7 +7,7 @@ import base64
 import logging
 from io import BytesIO
 
-logger = logging.getLogger("astrbot")
+logger = logging.getLogger("astrbot.rss")
 
 
 class RssImageHandler:

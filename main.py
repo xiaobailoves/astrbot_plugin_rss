@@ -61,11 +61,11 @@ class RssPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
 
-        self.logger = logging.getLogger("astrbot")
+        self.logger = logging.getLogger("astrbot.rss")
         self.log_handler = MemoryLogHandler()
+        self.logger.addHandler(self.log_handler)
         # 交互式订阅向导状态
         self._wizards: dict[str, dict] = {}
-        self.logger.addHandler(self.log_handler)
         self.context = context
         self.config = config
         self.data_handler = DataHandler()
@@ -121,7 +121,7 @@ class RssPlugin(Star):
         self.http_session = aiohttp.ClientSession(
             trust_env=False,
             connector=aiohttp.TCPConnector(ssl=False if not self.verify_ssl else None),
-            timeout=aiohttp.ClientTimeout(total=30, connect=10),
+            timeout=aiohttp.ClientTimeout(total=45, connect=15),
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             },
@@ -184,6 +184,7 @@ class RssPlugin(Star):
         RssPlugin._shared_scheduler = AsyncIOScheduler()
         self.scheduler = RssPlugin._shared_scheduler
         self.scheduler.start()
+        self.scheduler.remove_all_jobs()  # 清空可能残留的 job
         RssPlugin._shared_http_session = self.http_session
 
         # ── WebUI 配置覆盖加载 ────────────────────────────
@@ -276,10 +277,9 @@ class RssPlugin(Star):
     #  Subscription logic
     # ═══════════════════════════════════════════════════════════
 
-    async def _add_url(self, url: str, cron_expr: str, message: AstrMessageEvent,
-                       renderer: str = None):
-        """内部方法：添加URL订阅的共用逻辑"""
-        user = message.unified_msg_origin
+    async def _add_subscription(self, url: str, cron_expr: str, user: str,
+                                  renderer: str = None):
+        """纯逻辑：添加订阅，返回 (ok, data_or_error)"""
         async with self.fetcher.get_lock(url):
             subscriber = {
                 "cron_expr": cron_expr,
@@ -292,7 +292,6 @@ class RssPlugin(Star):
 
             if url in self.data_handler.data:
                 if user in self.data_handler.data[url]["subscribers"]:
-                    # 已有订阅，只更新 cron 和 renderer，保留 pushed_hashes / paused
                     existing = self.data_handler.data[url]["subscribers"][user]
                     existing["cron_expr"] = cron_expr
                     if renderer: existing["renderer"] = renderer
@@ -305,11 +304,13 @@ class RssPlugin(Star):
                 try:
                     text = await self.fetcher.fetch(url)
                     if text is None:
-                        return message.plain_result(f"请求频道失败，请检查网络或 URL: {url}")
+                        return (False, f"无法访问该 Feed，请检查网络或 URL: {url}")
                     title, desc = self.data_handler.parse_channel_text_info(text)
                     latest_item = await self.fetcher.poll(url, raw_text=text)
+                except asyncio.TimeoutError:
+                    return (False, f"请求超时，服务器响应过慢: {url}")
                 except Exception as e:
-                    return message.plain_result(f"解析频道信息失败: {str(e)}")
+                    return (False, f"获取 Feed 失败: {type(e).__name__}: {e}")
 
                 subscriber["last_update"] = latest_item[-1].pubDate_timestamp if latest_item else int(time.time())
                 subscriber["latest_link"] = latest_item[-1].link if latest_item else ""
@@ -319,7 +320,15 @@ class RssPlugin(Star):
                     "info": {"title": title, "description": desc},
                 }
             await self.data_handler.save_data()
-            return self.data_handler.data[url]["info"]
+            return (True, self.data_handler.data[url]["info"])
+
+    async def _add_url(self, url: str, cron_expr: str, message: AstrMessageEvent,
+                       renderer: str = None):
+        """命令包装：调用 _add_subscription，错误转为 plain_result"""
+        ok, data = await self._add_subscription(url, cron_expr, message.unified_msg_origin, renderer)
+        if not ok:
+            return message.plain_result(data)
+        return data
 
     # ═══════════════════════════════════════════════════════════
     #  Utilities
@@ -382,11 +391,11 @@ class RssPlugin(Star):
         if not self._is_url_or_ip(url):
             yield event.plain_result("请输入正确的URL")
             return
-        elif url in self.data_handler.data["rsshub_endpoints"]:
+        elif url in self.data_handler.data.get("rsshub_endpoints", []):
             yield event.plain_result("该RSSHub端点已存在")
             return
         else:
-            self.data_handler.data["rsshub_endpoints"].append(url)
+            self.data_handler.data.get("rsshub_endpoints", []).append(url)
             await self.data_handler.save_data()
             yield event.plain_result("添加成功")
 
@@ -400,7 +409,7 @@ class RssPlugin(Star):
             + "\n".join(
                 [
                     f"{i}: {x}"
-                    for i, x in enumerate(self.data_handler.data["rsshub_endpoints"])
+                    for i, x in enumerate(self.data_handler.data.get("rsshub_endpoints", []))
                 ]
             )
         )
@@ -424,7 +433,7 @@ class RssPlugin(Star):
             yield event.plain_result("索引越界")
             return
         else:
-            self.data_handler.data["rsshub_endpoints"].pop(idx)
+            self.data_handler.data.get("rsshub_endpoints", []).pop(idx)
             await self.data_handler.save_data()
             self._fresh_asyncIOScheduler()
             yield event.plain_result("删除成功")
@@ -470,6 +479,10 @@ class RssPlugin(Star):
             elif cmd == "update":
                 idx = w["idx"]
                 subs = self.data_handler.get_subs_channel_url(user)
+                if idx < 0 or idx >= len(subs):
+                    yield event.plain_result("该订阅已不存在，请重新操作")
+                    del self._wizards[user]
+                    return
                 url = subs[idx]
                 sub = self.data_handler.data[url]["subscribers"][user]
                 sub["cron_expr"] = w["cron"]
@@ -484,7 +497,7 @@ class RssPlugin(Star):
                     f"✅ 更新成功！\n频道: {self.data_handler.data[url]['info']['title']}\n周期: `{w['cron']}`"
                 )
             else:  # add (rsshub)
-                url = self.data_handler.data["rsshub_endpoints"][w["idx"]] + w["route"]
+                url = self.data_handler.data.get("rsshub_endpoints", [])[w["idx"]] + w["route"]
                 ret = await self._add_url(url, w["cron"], event, model)
                 if isinstance(ret, MessageEventResult):
                     yield ret
@@ -671,7 +684,7 @@ class RssPlugin(Star):
             if url in self.data_handler.data.get("rsshub_endpoints", []):
                 yield event.plain_result("该端点已存在")
             else:
-                self.data_handler.data["rsshub_endpoints"].append(url)
+                self.data_handler.data.get("rsshub_endpoints", []).append(url)
                 await self.data_handler.save_data()
                 yield event.plain_result(f"✅ 已添加: {url}")
             del self._wizards[user]
@@ -698,10 +711,16 @@ class RssPlugin(Star):
     @filter.command("")
     async def _wizard_handler(self, event: AstrMessageEvent):
         """[内部] 处理交互式向导消息"""
-        """全局消息监听 — 处理交互式向导输入"""
         user = event.unified_msg_origin
+        # 清理过期向导（超过 10 分钟未活动）
+        now = time.time()
+        stale = [u for u, w in self._wizards.items()
+                  if now - w.get("_ts", 0) > 600]
+        for u in stale:
+            del self._wizards[u]
         if user not in self._wizards:
             return  # 不在向导中，忽略
+        self._wizards[user]["_ts"] = now
         async for result in self._handle_wizard(event):
             yield result
 
@@ -735,7 +754,7 @@ class RssPlugin(Star):
             self._wizards[event.unified_msg_origin] = {"step": "idx", "type": "rsshub"}
             return
 
-        if idx < 0 or idx >= len(self.data_handler.data["rsshub_endpoints"]):
+        if idx < 0 or idx >= len(self.data_handler.data.get("rsshub_endpoints", [])):
             yield event.plain_result("索引越界")
             return
         if not route or not route.startswith("/"):
@@ -745,8 +764,8 @@ class RssPlugin(Star):
             yield event.plain_result("缺少 Cron 参数")
             return
 
-        url = self.data_handler.data["rsshub_endpoints"][idx] + route
-        cron_expr = f"{minute} {hour} {day} {month} {day_of_week}"
+        url = self.data_handler.data.get("rsshub_endpoints", [])[idx] + route
+        cron_expr = f"{minute or '*'} {hour or '*'} {day or '*'} {month or '*'} {day_of_week or '*'}"
         try:
             cron_expr = self.normalize_cron(cron_expr)
         except ValueError as e:

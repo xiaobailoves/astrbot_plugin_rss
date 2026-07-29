@@ -42,7 +42,7 @@ class DataHandler:
             with open(self.config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError:
-            logger = logging.getLogger("astrbot")
+            logger = logging.getLogger("astrbot.rss")
             logger.error(f"数据文件 {self.config_path} 已损坏，正在备份并重建...")
             backup_path = self.config_path + ".corrupted_backup"
             os.replace(self.config_path, backup_path)
@@ -65,6 +65,11 @@ class DataHandler:
     def parse_channel_text_info(self, text):
         """解析RSS频道信息（feedparser 统一 RSS/Atom/RDF）"""
         try:
+            if isinstance(text, bytes):
+                try:
+                    text = text.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = text.decode("latin-1")
             feed = feedparser.parse(text)
             title = feed.feed.get("title", "未知频道")
             description = feed.feed.get("description", "") or feed.feed.get("subtitle", "")
