@@ -808,10 +808,12 @@ class RssPlugin(Star):
                 controller.keep(timeout=600, reset_timeout=True)
 
             elif state["step"] == 1:
-                if not answer.startswith("/"):
-                    await evt.send(evt.plain_result("路由必须以 / 开头，请重新输入:"))
+                if not answer:
+                    await evt.send(evt.plain_result("路由不能为空，请重新输入:"))
                     controller.keep(timeout=600, reset_timeout=True)
                     return
+                if not answer.startswith("/"):
+                    answer = "/" + answer.lstrip("/")
                 state["route"] = answer
                 state["step"] = 2
                 await evt.send(evt.plain_result("⏱ 输入 Cron 表达式 (如 0 * * * *，快捷词如 每小时):"))
