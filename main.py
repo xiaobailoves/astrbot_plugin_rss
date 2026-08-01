@@ -783,13 +783,16 @@ class RssPlugin(Star):
         @session_waiter(timeout=600)
         async def wizard(controller, evt):
             text = evt.message_str.strip()
-            if text.startswith("/rss cancel") or text.lower() in ("cancel", "取消", "退出"):
+            if any(kw in text.lower() for kw in ("cancel", "取消", "退出", "/rss cancel")):
                 await evt.send(evt.plain_result("已退出引导"))
                 controller.stop()
                 return
-            # 抽取纯答案：/rss add xxx → xxx
-            parts = text.split(maxsplit=1)
-            answer = parts[1] if len(parts) > 1 else text
+            # 抽取纯答案：/rss add xxx → xxx，Cron 不拆
+            if state["step"] == 2:
+                answer = text  # Cron 保留完整
+            else:
+                parts = text.split(maxsplit=1)
+                answer = parts[1] if len(parts) > 1 else text
 
             if state["step"] == 0:
                 try:
@@ -1169,7 +1172,7 @@ class RssPlugin(Star):
             del self._wizards[user]
             yield event.plain_result("已退出引导模式")
         else:
-            yield event.plain_result("当前不在引导中")
+            yield event.plain_result("当前不在引导中，或引导已由会话控制器接管（直接回复 cancel 即可退出）")
 
     @rss.command("filter-help")
     async def filter_help_command(self, event: AstrMessageEvent):
