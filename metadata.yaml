@@ -1,6 +1,6 @@
 name: astrbot_plugin_rss
 desc: RSS 订阅插件，支持 RSSHub / 直连 URL，自定义排版模型，定时推送，Web 面板管理
 help: https://github.com/xiaobailoves/astrbot_plugin_rss
-version: v2.1.0
+version: v2.2.0
 author: Xiaobailoves
 repo: https://github.com/xiaobailoves/astrbot_plugin_rss
