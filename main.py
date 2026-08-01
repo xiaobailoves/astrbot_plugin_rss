@@ -8,7 +8,8 @@ import aiohttp
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, MessageChain, session_waiter
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, MessageChain
+from astrbot.core.utils.session_waiter import session_waiter, SessionController
 from astrbot.api.star import Context, Star, register
 from astrbot.api import AstrBotConfig
 import astrbot.api.message_components as Comp
@@ -780,11 +781,11 @@ class RssPlugin(Star):
         state = {"step": 0, "ep": 0, "route": "", "cron": "", "model": ""}
 
         @session_waiter(timeout=600)
-        async def wizard(ctrl, evt):
+        async def wizard(controller, evt):
             text = evt.message_str.strip()
             if text.startswith("/rss cancel"):
-                yield evt.plain_result("已退出引导")
-                ctrl.stop()
+                await evt.send(evt.plain_result("已退出引导"))
+                controller.stop()
                 return
             # 抽取纯答案：/rss add xxx → xxx
             parts = text.split(maxsplit=1)
@@ -794,39 +795,39 @@ class RssPlugin(Star):
                 try:
                     ep = int(answer)
                 except ValueError:
-                    yield evt.plain_result("请输入数字序号")
-                    ctrl.keep(timeout=600, reset_timeout=True)
+                    await evt.send(evt.plain_result("请输入数字序号"))
+                    controller.keep(timeout=600, reset_timeout=True)
                     return
                 if ep < 0 or ep >= len(eps):
-                    yield evt.plain_result("序号超出范围")
-                    ctrl.keep(timeout=600, reset_timeout=True)
+                    await evt.send(evt.plain_result("序号超出范围"))
+                    controller.keep(timeout=600, reset_timeout=True)
                     return
                 state["ep"] = ep
                 state["step"] = 1
-                yield evt.plain_result("🔗 输入路由 (如 /twitter/user/xxx):")
-                ctrl.keep(timeout=600, reset_timeout=True)
+                await evt.send(evt.plain_result("🔗 输入路由 (如 /twitter/user/xxx):"))
+                controller.keep(timeout=600, reset_timeout=True)
 
             elif state["step"] == 1:
                 if not answer.startswith("/"):
-                    yield evt.plain_result("路由必须以 / 开头，请重新输入:")
-                    ctrl.keep(timeout=600, reset_timeout=True)
+                    await evt.send(evt.plain_result("路由必须以 / 开头，请重新输入:"))
+                    controller.keep(timeout=600, reset_timeout=True)
                     return
                 state["route"] = answer
                 state["step"] = 2
-                yield evt.plain_result("⏱ 输入 Cron 表达式 (如 0 * * * *，快捷词如 每小时):")
-                ctrl.keep(timeout=600, reset_timeout=True)
+                await evt.send(evt.plain_result("⏱ 输入 Cron 表达式 (如 0 * * * *，快捷词如 每小时):"))
+                controller.keep(timeout=600, reset_timeout=True)
 
             elif state["step"] == 2:
                 try:
                     cron = self.normalize_cron(answer)
                 except ValueError as e:
-                    yield evt.plain_result(f"格式错误: {e}\n请重新输入:")
-                    ctrl.keep(timeout=600, reset_timeout=True)
+                    await evt.send(evt.plain_result(f"格式错误: {e}\n请重新输入:"))
+                    controller.keep(timeout=600, reset_timeout=True)
                     return
                 state["cron"] = cron
                 state["step"] = 3
-                yield evt.plain_result("🎨 输入模型名称 (默认/twitter/compose，直接回车跳过):")
-                ctrl.keep(timeout=600, reset_timeout=True)
+                await evt.send(evt.plain_result("🎨 输入模型名称 (默认/twitter/compose，直接回车跳过):"))
+                controller.keep(timeout=600, reset_timeout=True)
 
             elif state["step"] == 3:
                 model = answer if answer else None
@@ -834,10 +835,10 @@ class RssPlugin(Star):
                 ok, info = await self._add_subscription(url, state["cron"], evt.unified_msg_origin, model)
                 if ok:
                     self._add_single_job(url, evt.unified_msg_origin, state["cron"])
-                    yield evt.plain_result(f"✅ 添加成功！\n频道: {info['title']}\n周期: `{state['cron']}`\n模型: {model or '默认'}")
+                    await evt.send(evt.plain_result(f"✅ 添加成功！\n频道: {info['title']}\n周期: `{state['cron']}`\n模型: {model or '默认'}"))
                 else:
-                    yield evt.plain_result(f"❌ {info}")
-                ctrl.stop()
+                    await evt.send(evt.plain_result(f"❌ {info}"))
+                controller.stop()
 
         try:
             await wizard(event)
