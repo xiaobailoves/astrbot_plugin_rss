@@ -783,7 +783,7 @@ class RssPlugin(Star):
         @session_waiter(timeout=600)
         async def wizard(controller, evt):
             text = evt.message_str.strip()
-            if text.startswith("/rss cancel"):
+            if text.startswith("/rss cancel") or text.lower() in ("cancel", "取消", "退出"):
                 await evt.send(evt.plain_result("已退出引导"))
                 controller.stop()
                 return
