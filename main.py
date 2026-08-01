@@ -8,7 +8,7 @@ import aiohttp
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, MessageChain
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, MessageChain, session_waiter
 from astrbot.api.star import Context, Star, register
 from astrbot.api import AstrBotConfig
 import astrbot.api.message_components as Comp
@@ -362,7 +362,7 @@ class RssPlugin(Star):
         except asyncio.InvalidStateError:
             pass
 
-    async def close(self):
+    async def terminate(self):
         if self.scheduler and self.scheduler.running:
             self.scheduler.shutdown(wait=False)
         if not self.http_session.closed:
@@ -371,6 +371,10 @@ class RssPlugin(Star):
             RssPlugin._shared_scheduler = None
         if RssPlugin._shared_http_session is self.http_session:
             RssPlugin._shared_http_session = None
+
+    async def close(self):
+        """兼容旧版 AstrBot"""
+        await self.terminate()
 
     # ═══════════════════════════════════════════════════════════
     #  Commands: RSSHub endpoints
@@ -736,57 +740,111 @@ class RssPlugin(Star):
         renderer: str = None,
     ):
         """通过 RSSHub 路由添加订阅（无参数进入引导）"""
-        """通过 RSSHub 路由添加订阅（无参数进入引导）"""
-        # 在向导中？路由到向导处理
-        if event.unified_msg_origin in self._wizards:
-            async for result in self._handle_wizard(event):
-                yield result
-            return
-
-        # 无参数 → 启动交互式向导
-        if idx is None:
-            eps = self.data_handler.data.get("rsshub_endpoints", [])
-            if not eps:
-                yield event.plain_result("请先添加 RSSHub 端点: /rss rsshub add <url>")
+        # 快速路径：全部参数齐全
+        if idx is not None and route and minute:
+            if idx < 0 or idx >= len(self.data_handler.data.get("rsshub_endpoints", [])):
+                yield event.plain_result("索引越界")
                 return
-            lines = ["📡 选择一个 RSSHub 端点（输入序号）:"]
-            for i, u in enumerate(eps):
-                lines.append(f"  {i}. {u}")
-            lines.append("── 也可以直接 /rss add <序号> <路由> <Cron> [模型] 快速订阅 | /rss cancel 退出")
-            yield event.plain_result("\n".join(lines))
-            self._wizards[event.unified_msg_origin] = {"_ts": time.time(), "step": "idx", "type": "rsshub"}
+            if not route.startswith("/"):
+                yield event.plain_result("路由必须以 / 开头")
+                return
+            url = self.data_handler.data.get("rsshub_endpoints", [])[idx] + route
+            cron_expr = f"{minute or '*'} {hour or '*'} {day or '*'} {month or '*'} {day_of_week or '*'}"
+            try:
+                cron_expr = self.normalize_cron(cron_expr)
+            except ValueError as e:
+                yield event.plain_result(f"❌ Cron 格式错误: {e}")
+                return
+            ret = await self._add_url(url, cron_expr, event, renderer)
+            if isinstance(ret, MessageEventResult):
+                yield ret
+                return
+            self._add_single_job(url, event.unified_msg_origin, cron_expr)
+            yield event.plain_result(
+                f"添加成功。频道信息：\n标题: {ret['title']}\n描述: {ret['description']}"
+            )
             return
 
-        if idx < 0 or idx >= len(self.data_handler.data.get("rsshub_endpoints", [])):
-            yield event.plain_result("索引越界")
-            return
-        if not route or not route.startswith("/"):
-            yield event.plain_result("路由必须以 / 开头")
-            return
-        if not minute:
-            yield event.plain_result("缺少 Cron 参数")
+        # 交互式向导
+        eps = self.data_handler.data.get("rsshub_endpoints", [])
+        if not eps:
+            yield event.plain_result("请先添加 RSSHub 端点: /rss rsshub add <url>")
             return
 
-        url = self.data_handler.data.get("rsshub_endpoints", [])[idx] + route
-        cron_expr = f"{minute or '*'} {hour or '*'} {day or '*'} {month or '*'} {day_of_week or '*'}"
+        lines = ["📡 选择一个 RSSHub 端点（输入序号）:"]
+        for i, u in enumerate(eps):
+            lines.append(f"  {i}. {u}")
+        lines.append("── 也可以直接 /rss add <序号> <路由> <Cron> [模型] 快速订阅")
+        yield event.plain_result("\n".join(lines))
+
+        state = {"step": 0, "ep": 0, "route": "", "cron": "", "model": ""}
+
+        @session_waiter(timeout=600)
+        async def wizard(ctrl, evt):
+            text = evt.message_str.strip()
+            if text.startswith("/rss cancel"):
+                yield evt.plain_result("已退出引导")
+                ctrl.stop()
+                return
+            # 抽取纯答案：/rss add xxx → xxx
+            parts = text.split(maxsplit=1)
+            answer = parts[1] if len(parts) > 1 else text
+
+            if state["step"] == 0:
+                try:
+                    ep = int(answer)
+                except ValueError:
+                    yield evt.plain_result("请输入数字序号")
+                    ctrl.keep(timeout=600, reset_timeout=True)
+                    return
+                if ep < 0 or ep >= len(eps):
+                    yield evt.plain_result("序号超出范围")
+                    ctrl.keep(timeout=600, reset_timeout=True)
+                    return
+                state["ep"] = ep
+                state["step"] = 1
+                yield evt.plain_result("🔗 输入路由 (如 /twitter/user/xxx):")
+                ctrl.keep(timeout=600, reset_timeout=True)
+
+            elif state["step"] == 1:
+                if not answer.startswith("/"):
+                    yield evt.plain_result("路由必须以 / 开头，请重新输入:")
+                    ctrl.keep(timeout=600, reset_timeout=True)
+                    return
+                state["route"] = answer
+                state["step"] = 2
+                yield evt.plain_result("⏱ 输入 Cron 表达式 (如 0 * * * *，快捷词如 每小时):")
+                ctrl.keep(timeout=600, reset_timeout=True)
+
+            elif state["step"] == 2:
+                try:
+                    cron = self.normalize_cron(answer)
+                except ValueError as e:
+                    yield evt.plain_result(f"格式错误: {e}\n请重新输入:")
+                    ctrl.keep(timeout=600, reset_timeout=True)
+                    return
+                state["cron"] = cron
+                state["step"] = 3
+                yield evt.plain_result("🎨 输入模型名称 (默认/twitter/compose，直接回车跳过):")
+                ctrl.keep(timeout=600, reset_timeout=True)
+
+            elif state["step"] == 3:
+                model = answer if answer else None
+                url = eps[state["ep"]] + state["route"]
+                ok, info = await self._add_subscription(url, state["cron"], evt.unified_msg_origin, model)
+                if ok:
+                    self._add_single_job(url, evt.unified_msg_origin, state["cron"])
+                    yield evt.plain_result(f"✅ 添加成功！\n频道: {info['title']}\n周期: `{state['cron']}`\n模型: {model or '默认'}")
+                else:
+                    yield evt.plain_result(f"❌ {info}")
+                ctrl.stop()
+
         try:
-            cron_expr = self.normalize_cron(cron_expr)
-        except ValueError as e:
-            yield event.plain_result(f"❌ Cron 格式错误: {e}")
-            return
-
-        ret = await self._add_url(url, cron_expr, event, renderer)
-        if isinstance(ret, MessageEventResult):
-            yield ret
-            return
-        else:
-            chan_title = ret["title"]
-            chan_desc = ret["description"]
-
-        self._add_single_job(url, event.unified_msg_origin, cron_expr)
-        yield event.plain_result(
-            f"添加成功。频道信息：\n标题: {chan_title}\n描述: {chan_desc}"
-        )
+            await wizard(event)
+        except TimeoutError:
+            yield event.plain_result("⏰ 向导超时，已退出")
+        finally:
+            event.stop_event()
 
     @rss.command("add-url")
     async def add_url_command(
