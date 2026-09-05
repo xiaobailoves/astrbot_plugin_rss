@@ -116,15 +116,17 @@ class RssImageHandler:
                 logger.warning(f"图片下载失败 ({image_url[:80]}...): {type(e).__name__}: {e}")
                 # 跳出循环走回退逻辑
 
-        # 反代失败，回退原始 URL 直连重试一次
+        # 反代失败，回退原始 URL 重试一次（走用户配置的代理）
         if content is None and fallback_url:
-            logger.warning(f"⚠️ 反代下载失败，回退直连: {fallback_url[:80]}...")
+            logger.warning(f"⚠️ 反代下载失败，回退原 URL: {fallback_url[:80]}...")
             try:
-                async with self.http_session.get(fallback_url, timeout=15) as resp:
+                async with self.http_session.get(
+                    fallback_url, proxy=self.proxy, timeout=15
+                ) as resp:
                     if resp.status == 200:
                         content = await resp.read()
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                logger.error(f"图片直连也失败 ({fallback_url[:80]}...): {type(e).__name__}: {e}")
+                logger.error(f"图片回退也失败 ({fallback_url[:80]}...): {type(e).__name__}: {e}")
 
         if content is None:
             return None
