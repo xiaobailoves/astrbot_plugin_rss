@@ -85,6 +85,7 @@ class RssPlugin(Star):
         self.t2i = config.get("t2i")
         self.is_hide_url = config.get("is_hide_url")
         self.max_consecutive_failures = config.get("max_consecutive_failures", 100)
+        self.max_retry_count = config.get("max_retry_count", 10)
         self.is_compose = config.get("compose")
         self.proxy = config.get("proxy", None)
         self.verify_ssl = config.get("verify_ssl", True)
@@ -176,6 +177,7 @@ class RssPlugin(Star):
             t2i=self.t2i,
             max_items_per_poll=self.max_items_per_poll,
             max_consecutive_failures=self.max_consecutive_failures,
+            max_retry_count=self.max_retry_count,
         )
 
         # ── 热重载资源清理 ────────────────────────────────
@@ -199,6 +201,14 @@ class RssPlugin(Star):
         saved_overrides = self.data_handler.data.get("settings", {}).get("config", {})
         for k, v in saved_overrides.items():
             self.config[k] = v
+
+        # ── 重启后重置连续失败计数（跨会话不累计）─────────
+        for url, info in self.data_handler.data.items():
+            if url in ("rsshub_endpoints", "settings") or url.startswith("_"):
+                continue
+            for sub in info.get("subscribers", {}).values():
+                if sub.get("consecutive_failures", 0) > 0:
+                    sub["consecutive_failures"] = 0
 
         self._fresh_asyncIOScheduler()
 
@@ -1401,6 +1411,51 @@ class RssPlugin(Star):
             yield event.plain_result("已退出引导模式")
         else:
             yield event.plain_result("当前不在引导中，或引导已由会话控制器接管（直接回复 cancel 即可退出）")
+
+    @rss.command("test-proxy")
+    async def test_proxy_command(self, event: AstrMessageEvent):
+        """测试图片代理连通性（通用代理 + Twitter 反代）"""
+        import time as _t
+        results = []
+
+        # 1. 通用代理测试（用图片代理拉一张测试图）
+        proxy = self.proxy
+        if proxy:
+            try:
+                t0 = _t.time()
+                async with self.http_session.get(
+                    "https://httpbin.org/image/png", proxy=proxy, timeout=15
+                ) as resp:
+                    data = await resp.read()
+                    dt = (_t.time() - t0) * 1000
+                    if resp.status == 200 and data[:8] == b'\x89PNG\r\n\x1a\n':
+                        results.append(f"✅ 通用代理 {proxy}: 可用 ({dt:.0f}ms, {len(data)//1024}KB)")
+                    else:
+                        results.append(f"❌ 通用代理 {proxy}: HTTP {resp.status}")
+            except Exception as e:
+                results.append(f"❌ 通用代理 {proxy}: {type(e).__name__}: {str(e)[:60]}")
+        else:
+            results.append("ℹ️ 未配置通用代理")
+
+        # 2. Twitter 反代测试
+        if self.use_twitter_reverse_proxy:
+            domain = self.twitter_reverse_proxy_domain
+            test_url = f"https://{domain}/profile_images/2069698860558036992/CqaVheI8.jpg"
+            try:
+                t0 = _t.time()
+                async with self.http_session.get(test_url, timeout=15) as resp:
+                    data = await resp.read()
+                    dt = (_t.time() - t0) * 1000
+                    if resp.status == 200 and len(data) > 1000:
+                        results.append(f"✅ Twitter 反代 {domain}: 可用 ({dt:.0f}ms, {len(data)//1024}KB)")
+                    else:
+                        results.append(f"❌ Twitter 反代 {domain}: HTTP {resp.status}")
+            except Exception as e:
+                results.append(f"❌ Twitter 反代 {domain}: {type(e).__name__}: {str(e)[:60]}")
+        else:
+            results.append("ℹ️ 未开启 Twitter 反代")
+
+        yield event.plain_result("🔍 图片代理测试结果:\n" + "\n".join(results))
 
     @rss.command("filter-help")
     async def filter_help_command(self, event: AstrMessageEvent):

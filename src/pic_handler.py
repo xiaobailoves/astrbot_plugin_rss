@@ -54,11 +54,13 @@ class RssImageHandler:
             str: Base64 字符串。
         """
         request_proxy = self.proxy
+        fallback_url = None  # 反代失败时回退的原始 URL
 
         # 检查是否开启推特反代，并且链接是推特图片CDN
         if self.use_twitter_reverse_proxy and "pbs.twimg.com" in image_url:
             original_url = image_url
             image_url = image_url.replace("pbs.twimg.com", self.twitter_reverse_proxy_domain)
+            fallback_url = original_url  # 反代挂了回退直连
             logger.info(f"🔄 Twitter 反代: {original_url[:60]}... → {image_url[:60]}...")
             # 使用反代时通常为了速度会选择直连，强制将此次请求的 proxy 置空
             request_proxy = None
@@ -113,6 +115,16 @@ class RssImageHandler:
                     tip = "（提示：Twitter 图片需开启 pic_config.use_twitter_reverse_proxy）"
                 logger.error(f"图片下载失败 ({image_url[:80]}...): {type(e).__name__}: {e}{tip}")
                 return None
+
+        # 反代失败，回退原始 URL 直连重试一次
+        if content is None and fallback_url:
+            logger.warning(f"⚠️ 反代下载失败，回退直连: {fallback_url[:80]}...")
+            try:
+                async with self.http_session.get(fallback_url, timeout=15) as resp:
+                    if resp.status == 200:
+                        content = await resp.read()
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                logger.error(f"图片直连也失败 ({fallback_url[:80]}...): {type(e).__name__}: {e}")
 
         if content is None:
             return None

@@ -32,6 +32,7 @@ class PushManager:
         t2i: bool = False,
         max_items_per_poll: int = 3,
         max_consecutive_failures: int = 100,
+        max_retry_count: int = 10,
     ):
         self._context = context
         self._data_handler = data_handler
@@ -42,6 +43,7 @@ class PushManager:
         self._t2i = t2i
         self._max_items_per_poll = max_items_per_poll
         self._max_failures = max_consecutive_failures
+        self._max_retry = max_retry_count
         self._logger = logging.getLogger("astrbot")
 
     # ── Helpers ───────────────────────────────────────────
@@ -144,7 +146,11 @@ class PushManager:
             self._data_handler.data["_push_history"] = h[-200:]
 
     def _queue_failed(self, user: str, url: str, item: RSSItem):
-        """将推送失败的条目加入重试队列"""
+        """将推送失败的条目加入重试队列（上限 100 条）。
+
+        同时把指纹写入 pushed_hashes，防止正常轮询再次发现该条目——
+        进补推队列的条目只走补推这一条路，避免重复推送。
+        """
         self._data_handler.data.setdefault("_failed_pushes", []).append({
             "user": user,
             "url": url,
@@ -159,7 +165,22 @@ class PushManager:
                 "guid": getattr(item, 'guid', ''),
             },
             "failed_at": int(time.time()),
+            "retry_count": 0,
         })
+        q = self._data_handler.data["_failed_pushes"]
+        if len(q) > 100:
+            self._data_handler.data["_failed_pushes"] = q[-100:]
+
+        # 记录指纹，正常轮询不再重复发现
+        data = self._data_handler.data
+        if url in data and user in data[url].get("subscribers", {}):
+            fps = self._fetcher.fingerprints(
+                getattr(item, 'guid', ''), item.link, item.title, item.description
+            )
+            ph = data[url]["subscribers"][user].setdefault("pushed_hashes", [])
+            for fp in fps:
+                if fp not in ph:
+                    ph.append(fp)
 
     def _pick_renderer(self, user: str, url: str) -> BaseRenderer:
         """为指定订阅选择合适的渲染器"""
@@ -178,9 +199,28 @@ class PushManager:
         if not failed:
             return
 
+        # 过期清理：超过 24 小时的条目直接丢弃
+        now = int(time.time())
+        expired = [j for j in failed if now - j.get("failed_at", now) > 86400]
+        for j in expired:
+            failed.remove(j)
+        if expired:
+            self._logger.info(f"🧹 清理过期补推条目 {len(expired)} 条")
+        if not failed:
+            await self._data_handler.save_data()
+            return
+
         retry_success = []
         retry_giveup = []
         for job in failed:
+            # 超过最大重试次数直接放弃
+            if job.get("retry_count", 0) >= self._max_retry:
+                retry_giveup.append(job)
+                self._logger.warning(
+                    f"❌ 补推放弃（已重试 {self._max_retry} 次）: "
+                    f"{job.get('item', {}).get('title', '')[:30]}"
+                )
+                continue
             try:
                 item_data = job["item"]
                 item = RSSItem(
@@ -225,8 +265,10 @@ class PushManager:
                     )
                     retry_giveup.append(job)
                 else:
+                    job["retry_count"] = job.get("retry_count", 0) + 1
                     self._logger.warning(
-                        f"⏳ 补推仍失败 ({item_data.get('title', '')[:30]}...): {e}，下次继续重试"
+                        f"⏳ 补推仍失败 ({item_data.get('title', '')[:30]}...): {e}，"
+                        f"重试 {job['retry_count']}/{self._max_retry}"
                     )
 
         for job in retry_success + retry_giveup:
@@ -337,3 +379,5 @@ class PushManager:
                     self._logger.error(f"❌ 推送失败: {e}")
                     for item in new_items:
                         self._queue_failed(user, url, item)
+                    # 持久化：补推队列 + 队列指纹立即落盘
+                    await self._data_handler.save_data()

@@ -170,6 +170,8 @@ class TestPushManager:
         # 失败计数应该递增到 3（触发自动暂停）
         assert sub["consecutive_failures"] == 3
         assert sub["paused"] is True
-        # pushed_hashes 不应更新（推送失败不保存）
-        assert sub["pushed_hashes"] == []
+        # pushed_hashes 应记录指纹（进补推队列后正常轮询不再重复推送）
+        assert sub["pushed_hashes"] == ["abc123"]
         assert sub["last_update"] == 0
+        # 补推队列应有 1 条
+        assert len(pm._data_handler.data.get("_failed_pushes", [])) == 1

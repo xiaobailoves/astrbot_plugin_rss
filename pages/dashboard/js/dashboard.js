@@ -256,6 +256,7 @@ function config(app) {
     is_hide_url:            ['隐藏链接', '推送中不显示原文链接'],
     verify_ssl:             ['验证 HTTPS 证书', '关闭可跳过证书错误'],
     max_consecutive_failures: ['连续失败自动暂停', '失败此次数后自动暂停订阅，默认 100'],
+    max_retry_count:        ['补推最大重试次数', '补推失败条目的重试上限，超过放弃，默认 10'],
   };
   const card = h('div', { className: 'card' }, h('h3', {}, '插件配置'));
   Object.entries(labels).forEach(([k, info]) => {
@@ -277,7 +278,8 @@ function config(app) {
   });
   card.appendChild(h('div', { style: 'margin-top:14px;display:flex;gap:8px;' },
     h('button', { className: 'btn btn-primary', onclick: saveCfg }, '保存'),
-    h('button', { className: 'btn btn-outline', onclick: reload }, '重载调度')
+    h('button', { className: 'btn btn-outline', onclick: reload }, '重载调度'),
+    h('button', { className: 'btn btn-outline', onclick: testProxy }, '🔍 测试图片代理')
   ));
   app.appendChild(card);
 }
@@ -479,6 +481,24 @@ function reload() {
     toast('已重载，任务: ' + r.jobs);
     document.getElementById('info').textContent = r.jobs + ' 个任务';
   }).catch(e => toast('重载失败: ' + e, true));
+}
+
+function testProxy() {
+  toast('正在测试图片代理...');
+  $.get('proxy-test').then(r => {
+    const items = r.items || [];
+    let html = '<div style="font-size:13px;">';
+    items.forEach(it => {
+      const icon = it.ok === true ? '✅' : (it.ok === false ? '❌' : 'ℹ️');
+      const target = it.target ? '<div style="color:#8b949e;font-size:12px;">' + esc(it.target) + '</div>' : '';
+      html += '<div style="padding:8px 0;border-bottom:1px solid #f0f2f5;">' +
+        '<b>' + icon + ' ' + esc(it.name) + '</b>' +
+        (it.detail ? ' <span style="color:#656d76;">' + esc(it.detail) + '</span>' : '') +
+        target + '</div>';
+    });
+    html += '</div>';
+    modal('图片代理测试', html, [{ label: '关闭' }]);
+  }).catch(e => toast('测试失败: ' + e, true));
 }
 
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }

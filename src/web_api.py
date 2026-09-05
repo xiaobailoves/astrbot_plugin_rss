@@ -34,6 +34,7 @@ class RssWebApi:
             ("POST", "/reload",             self._reload_scheduler,  "重载调度器"),
             ("GET",  "/history",            self._list_history,      "推送历史"),
             ("GET",  "/logs",               self._list_logs,         "插件日志"),
+            ("GET",  "/proxy-test",         self._test_proxy,        "测试图片代理连通性"),
         ]
 
         for method, endpoint, handler, desc in routes:
@@ -308,7 +309,8 @@ class RssWebApi:
     async def _update_config(self):
         data = await request.get_json()
         allowed = {"title_max_length","description_max_length","max_items_per_poll",
-                    "max_consecutive_failures","compose","t2i","is_hide_url","verify_ssl","proxy"}
+                    "max_consecutive_failures","max_retry_count",
+                    "compose","t2i","is_hide_url","verify_ssl","proxy"}
         for key, value in data.items():
             if key not in allowed:
                 continue
@@ -355,3 +357,84 @@ class RssWebApi:
         except AttributeError:
             logs = []
         return jsonify({"items": logs})
+
+    async def _test_proxy(self):
+        """测试图片代理连通性，返回测试结果列表"""
+        import time as _t
+        results = []
+        plugin = self._plugin
+
+        # 1. 通用代理
+        proxy = plugin.proxy
+        if proxy:
+            try:
+                t0 = _t.time()
+                async with plugin.http_session.get(
+                    "https://httpbin.org/image/png", proxy=proxy, timeout=15
+                ) as resp:
+                    data = await resp.read()
+                    dt = int((_t.time() - t0) * 1000)
+                    if resp.status == 200 and data[:8] == b'\x89PNG\r\n\x1a\n':
+                        results.append({
+                            "name": "通用代理", "target": proxy, "ok": True,
+                            "detail": f"{dt}ms, {len(data)//1024}KB",
+                        })
+                    else:
+                        results.append({
+                            "name": "通用代理", "target": proxy, "ok": False,
+                            "detail": f"HTTP {resp.status}",
+                        })
+            except Exception as e:
+                results.append({
+                    "name": "通用代理", "target": proxy, "ok": False,
+                    "detail": f"{type(e).__name__}: {str(e)[:60]}",
+                })
+        else:
+            results.append({"name": "通用代理", "target": None, "ok": None, "detail": "未配置"})
+
+        # 2. Twitter 反代
+        if plugin.use_twitter_reverse_proxy:
+            domain = plugin.twitter_reverse_proxy_domain
+            test_url = f"https://{domain}/profile_images/2069698860558036992/CqaVheI8.jpg"
+            try:
+                t0 = _t.time()
+                async with plugin.http_session.get(test_url, timeout=15) as resp:
+                    data = await resp.read()
+                    dt = int((_t.time() - t0) * 1000)
+                    if resp.status == 200 and len(data) > 1000:
+                        results.append({
+                            "name": "Twitter 反代", "target": domain, "ok": True,
+                            "detail": f"{dt}ms, {len(data)//1024}KB",
+                        })
+                    else:
+                        results.append({
+                            "name": "Twitter 反代", "target": domain, "ok": False,
+                            "detail": f"HTTP {resp.status}",
+                        })
+            except Exception as e:
+                results.append({
+                    "name": "Twitter 反代", "target": domain, "ok": False,
+                    "detail": f"{type(e).__name__}: {str(e)[:60]}",
+                })
+        else:
+            results.append({"name": "Twitter 反代", "target": None, "ok": None, "detail": "未开启"})
+
+        # 3. 直连测试（基准）
+        try:
+            t0 = _t.time()
+            async with plugin.http_session.get(
+                "https://httpbin.org/image/png", timeout=15
+            ) as resp:
+                data = await resp.read()
+                dt = int((_t.time() - t0) * 1000)
+                results.append({
+                    "name": "直连（基准）", "target": None, "ok": resp.status == 200,
+                    "detail": f"{dt}ms, HTTP {resp.status}",
+                })
+        except Exception as e:
+            results.append({
+                "name": "直连（基准）", "target": None, "ok": False,
+                "detail": f"{type(e).__name__}: {str(e)[:60]}",
+            })
+
+        return jsonify({"items": results})

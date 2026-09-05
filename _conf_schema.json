@@ -68,6 +68,15 @@
         "minimum": 5,
         "maximum": 1000
     },
+    "max_retry_count": {
+        "description": "补推最大重试次数",
+        "type": "int",
+        "hint": "补推失败条目的最大重试次数，超过后放弃。默认 10。",
+        "obvious_hint": true,
+        "default": 10,
+        "minimum": 1,
+        "maximum": 50
+    },
     "pic_config": {
         "description": "图片相关配置",
         "type": "object",
