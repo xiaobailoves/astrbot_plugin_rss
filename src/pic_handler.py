@@ -65,7 +65,10 @@ class RssImageHandler:
             # 使用反代时通常为了速度会选择直连，强制将此次请求的 proxy 置空
             request_proxy = None
         elif self.use_twitter_reverse_proxy and self.twitter_reverse_proxy_domain in image_url:
-            # URL 已经是反代域名（如 RSSHub 自身已做了反代），同样直连避免走代理失败
+            # URL 已经是反代域名（如 RSSHub 自身已做了反代），失败时回退原始 pbs.twimg.com 直连
+            fallback_url = image_url.replace(
+                self.twitter_reverse_proxy_domain, "pbs.twimg.com"
+            )
             logger.debug(f"🔗 图片已是反代域名，直连: {image_url[:80]}...")
             request_proxy = None
         elif "pbs.twimg.com" in image_url and not self.use_twitter_reverse_proxy:
@@ -87,8 +90,8 @@ class RssImageHandler:
                         if not is_last:
                             logger.debug(f"⬇️ 降级: name={quality} 返回 {resp.status}，尝试下一级")
                             continue
-                        logger.error(f"图片下载失败: {attempt_url}, 状态码: {resp.status}")
-                        return None
+                        logger.warning(f"图片下载失败: {attempt_url}, 状态码: {resp.status}")
+                        break  # 跳出循环走回退逻辑
 
                     content_type = resp.headers.get("Content-Type", "")
                     # 只拒绝明确是文本/错误响应的类型，其余交给 PIL 验证
@@ -98,8 +101,8 @@ class RssImageHandler:
                         if not is_last:
                             logger.debug(f"⬇️ 降级: name={quality} Content-Type={content_type}，尝试下一级")
                             continue
-                        logger.error(f"图片下载失败: {attempt_url[:80]}..., 响应为文本类型: {content_type}")
-                        return None
+                        logger.warning(f"图片下载失败: {attempt_url[:80]}..., 响应为文本类型: {content_type}")
+                        break  # 跳出循环走回退逻辑
 
                     content = await resp.read()
                     if i > 0:
@@ -110,11 +113,8 @@ class RssImageHandler:
                 if not is_last:
                     logger.debug(f"⬇️ 降级: name={quality} {type(e).__name__}，尝试下一级")
                     continue
-                tip = ""
-                if "pbs.twimg.com" in image_url:
-                    tip = "（提示：Twitter 图片需开启 pic_config.use_twitter_reverse_proxy）"
-                logger.error(f"图片下载失败 ({image_url[:80]}...): {type(e).__name__}: {e}{tip}")
-                return None
+                logger.warning(f"图片下载失败 ({image_url[:80]}...): {type(e).__name__}: {e}")
+                # 跳出循环走回退逻辑
 
         # 反代失败，回退原始 URL 直连重试一次
         if content is None and fallback_url:
